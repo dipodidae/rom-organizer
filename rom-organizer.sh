@@ -282,14 +282,14 @@ main() {
   init_session "$collection_name" "$selected_system" "$list_file"
 
   log_info "DEBUG: About to count queries from $list_file"
-  
+
   # Count total queries
   log_verbose "Counting queries in: $list_file"
   if [[ ! -f "$list_file" ]]; then
     log_error "List file not found: $list_file"
     exit "$EXIT_GENERAL_ERROR"
   fi
-  
+
   local total_queries=0
   set +e  # Temporarily disable exit on error for the loop
   while IFS= read -r query <&3; do
@@ -300,7 +300,7 @@ main() {
     ((total_queries++))
   done 3<"$list_file"
   set -e  # Re-enable exit on error
-  
+
   log_verbose "Counted $total_queries queries"
 
   STATS[total]=$total_queries
@@ -319,28 +319,28 @@ main() {
     prepend_rating="false"
     ui_muted "No ratings will be prepended"
   fi
-  
+
   log_verbose "Starting query processing"
 
   # Process queries
   log_info "Starting to process queries from: $list_file"
-  
+
   # Verify file is readable
   if [[ ! -r "$list_file" ]]; then
     log_error "Cannot read list file: $list_file"
     exit "$EXIT_GENERAL_ERROR"
   fi
-  
+
   local line_number=0
   local processed_count=0
 
   log_info "Entering main processing loop"
-  
+
   # Disable exit on error for the read loop
   set +e
   while IFS= read -r query; do
     set -e  # Re-enable for loop body
-    
+
     line_number=$((line_number + 1))
     log_verbose "Read line $line_number: '$query'"
 
@@ -350,7 +350,7 @@ main() {
       set +e
       continue
     fi
-    
+
     query=$(trim "$query")
     if [[ -z "$query" ]]; then
       log_verbose "Skipping line $line_number (empty after trim)"
@@ -386,7 +386,7 @@ main() {
 
     # Update session state
     update_session "$line_number"
-    
+
     log_verbose "Finished processing query $processed_count, line $line_number"
     set +e  # Disable for next read iteration
 

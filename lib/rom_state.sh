@@ -28,12 +28,12 @@ init_session() {
   local collection="$1"
   local system="$2"
   local list_file="$3"
-  
+
   SESSION_ID=$(date +%Y%m%d_%H%M%S)
   STATE_FILE="${HOME}/.rom-organizer/sessions/session_${SESSION_ID}.state"
-  
+
   mkdir -p "$(dirname "$STATE_FILE")"
-  
+
   # Write initial state
   cat > "$STATE_FILE" <<EOF
 # ROM Organizer Session State
@@ -46,7 +46,7 @@ LIST_FILE=$list_file
 LAST_PROCESSED=0
 STATUS=active
 EOF
-  
+
   log_info "Session initialized: $SESSION_ID"
   log_verbose "State file: $STATE_FILE"
 }
@@ -60,22 +60,22 @@ EOF
 #######################################
 load_session() {
   local state_file="$1"
-  
+
   if [[ ! -f "$state_file" ]]; then
     log_error "State file not found: $state_file"
     return 1
   fi
-  
+
   # shellcheck source=/dev/null
   source "$state_file"
-  
+
   STATE_FILE="$state_file"
-  
+
   log_info "Session loaded from: $state_file"
   log_verbose "Collection: ${COLLECTION:-unknown}"
   log_verbose "System: ${SYSTEM:-unknown}"
   log_verbose "Last processed: ${LAST_PROCESSED:-0}"
-  
+
   return 0
 }
 
@@ -86,14 +86,14 @@ load_session() {
 #######################################
 update_session() {
   local last_processed="$1"
-  
+
   if [[ -z "$STATE_FILE" ]]; then
     return 0
   fi
-  
+
   # Update LAST_PROCESSED in state file
   sed -i "s/^LAST_PROCESSED=.*/LAST_PROCESSED=$last_processed/" "$STATE_FILE"
-  
+
   log_verbose "Updated session state: last_processed=$last_processed"
 }
 
@@ -104,12 +104,12 @@ complete_session() {
   if [[ -z "$STATE_FILE" ]]; then
     return 0
   fi
-  
+
   sed -i "s/^STATUS=.*/STATUS=complete/" "$STATE_FILE"
-  
+
   # Add completion timestamp
   echo "COMPLETED=$(date '+%Y-%m-%d %H:%M:%S')" >> "$STATE_FILE"
-  
+
   log_info "Session marked as complete"
 }
 
@@ -120,11 +120,11 @@ complete_session() {
 #######################################
 find_active_sessions() {
   local sessions_dir="${HOME}/.rom-organizer/sessions"
-  
+
   if [[ ! -d "$sessions_dir" ]]; then
     return 0
   fi
-  
+
   find "$sessions_dir" -name "session_*.state" -type f 2>/dev/null | while read -r state_file; do
     if grep -q "^STATUS=active" "$state_file" 2>/dev/null; then
       echo "$state_file"
@@ -141,7 +141,7 @@ find_active_sessions() {
 increment_stat() {
   local stat_name="$1"
   local increment="${2:-1}"
-  
+
   if [[ -n "${STATS[$stat_name]:-}" ]]; then
     STATS[$stat_name]=$((STATS[$stat_name] + increment))
   else
@@ -160,9 +160,9 @@ record_success() {
   local query="$1"
   local file_path="$2"
   local operation="${3:-copy}"
-  
+
   increment_stat "success"
-  
+
   log_info "SUCCESS: $operation - $query -> $file_path"
 }
 
@@ -175,9 +175,9 @@ record_success() {
 record_skip() {
   local query="$1"
   local reason="${2:-user_request}"
-  
+
   increment_stat "skipped"
-  
+
   log_info "SKIPPED: $query (reason: $reason)"
 }
 
@@ -190,9 +190,9 @@ record_skip() {
 record_error() {
   local query="$1"
   local error_msg="$2"
-  
+
   increment_stat "errors"
-  
+
   log_error "ERROR: $query - $error_msg"
 }
 
@@ -209,7 +209,7 @@ generate_summary() {
   local errors=${STATS[errors]}
   local auto_selected=${STATS[auto_selected]}
   local manual=${STATS[manual]}
-  
+
   cat <<EOF
 
 =======================================================
@@ -241,9 +241,9 @@ EOF
 #######################################
 write_summary() {
   local output_file="$1"
-  
+
   generate_summary > "$output_file"
-  
+
   log_info "Summary written to: $output_file"
 }
 
@@ -256,11 +256,11 @@ display_progress_stats() {
   local success=${STATS[success]}
   local skipped=${STATS[skipped]}
   local errors=${STATS[errors]}
-  
+
   if [[ $total -gt 0 ]]; then
     local percent
     percent=$(awk "BEGIN {printf \"%.0f\", ($processed / $total) * 100}" 2>/dev/null || echo "0")
-    
+
     ui_info "Progress: $processed/$total ($percent%) | Success: $success | Skipped: $skipped | Errors: $errors"
   fi
 }
@@ -276,16 +276,16 @@ log_operation() {
   local entry_type="$1"
   local query="$2"
   local details="${3:-}"
-  
+
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  
+
   local log_entry="[$timestamp] [$entry_type] Query: $query"
-  
+
   if [[ -n "$details" ]]; then
     log_entry="$log_entry | $details"
   fi
-  
+
   echo "$log_entry" >> "$LOG_FILE"
 }
 
@@ -296,7 +296,7 @@ log_operation() {
 #######################################
 export_session_data() {
   local export_file="$1"
-  
+
   cat > "$export_file" <<EOF
 {
   "session_id": "${SESSION_ID:-unknown}",
@@ -314,7 +314,7 @@ export_session_data() {
   "log_file": "${LOG_FILE:-}"
 }
 EOF
-  
+
   log_info "Session data exported to: $export_file"
 }
 
@@ -326,14 +326,14 @@ EOF
 cleanup_old_sessions() {
   local days="${1:-7}"
   local sessions_dir="${HOME}/.rom-organizer/sessions"
-  
+
   if [[ ! -d "$sessions_dir" ]]; then
     return 0
   fi
-  
+
   log_info "Cleaning up session files older than $days days"
-  
+
   find "$sessions_dir" -name "session_*.state" -type f -mtime "+$days" -delete 2>/dev/null || true
-  
+
   log_verbose "Old session files cleaned up"
 }

@@ -180,7 +180,7 @@ ui_confirm() {
   fi
 
   log_verbose "ui_confirm: About to run gum confirm"
-  
+
   # Temporarily disable exit on error for interactive command
   set +e
   "${args[@]}"
