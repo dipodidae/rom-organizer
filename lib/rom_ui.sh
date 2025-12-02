@@ -2,13 +2,6 @@
 # ROM Organizer - UI Functions
 # This file contains all gum-related UI interactions and safe wrappers
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-# shellcheck source=lib/rom_utils.sh
-source "$SCRIPT_DIR/rom_utils.sh"
-
 #######################################
 # Safe wrapper for gum commands that handles errors gracefully
 # Arguments:
@@ -21,13 +14,13 @@ source "$SCRIPT_DIR/rom_utils.sh"
 gum_safe() {
   local result
   local exit_code
-  
+
   # Temporarily disable exit on error
   set +e
   result=$("$@" 2>&1)
   exit_code=$?
   set -e
-  
+
   echo "$result"
   return $exit_code
 }
@@ -42,7 +35,7 @@ ui_message() {
   local color="$1"
   shift
   local message="$*"
-  
+
   if command -v gum &>/dev/null; then
     gum style --foreground "$color" "$message"
   else
@@ -135,22 +128,30 @@ ui_choose() {
   local header="$1"
   shift
   local options=("$@")
-  
+
+  log_verbose "ui_choose called with header='$header', ${#options[@]} options"
+
   if ! command -v gum &>/dev/null; then
     log_error "gum is not available for interactive selection"
     return 1
   fi
-  
-  local choice
-  choice=$(gum_safe gum choose --header "$header" "${options[@]}")
-  local exit_code=$?
-  
+
+  log_verbose "Calling gum choose..."
+  local exit_code
+
+  # Temporarily disable exit on error for interactive command
+  # Don't capture output here - let it flow through to caller
+  set +e
+  gum choose --header "$header" "${options[@]}"
+  exit_code=$?
+  set -e
+
+  log_verbose "gum choose returned exit code: $exit_code"
   if [[ $exit_code -ne 0 ]]; then
     log_verbose "User cancelled selection"
     return 1
   fi
-  
-  echo "$choice"
+
   return 0
 }
 
@@ -165,22 +166,30 @@ ui_choose() {
 ui_confirm() {
   local prompt="$1"
   local default="${2:-false}"
-  
+
+  log_verbose "ui_confirm called with prompt='$prompt', default='$default'"
+
   if ! command -v gum &>/dev/null; then
     log_warning "gum not available, assuming default: $default"
     [[ "$default" == "true" ]] && return 0 || return 1
   fi
-  
+
   local args=("gum" "confirm" "$prompt")
   if [[ "$default" == "true" ]]; then
     args+=(--default=true)
   fi
+
+  log_verbose "ui_confirm: About to run gum confirm"
   
-  if gum_safe "${args[@]}" >/dev/null 2>&1; then
-    return 0
-  else
-    return 1
-  fi
+  # Temporarily disable exit on error for interactive command
+  set +e
+  "${args[@]}"
+  local exit_code=$?
+  set -e
+
+  log_verbose "ui_confirm: gum confirm returned exit code $exit_code"
+
+  return $exit_code
 }
 
 #######################################
@@ -196,27 +205,31 @@ ui_confirm() {
 ui_input() {
   local prompt="$1"
   local placeholder="${2:-}"
-  
+
   if ! command -v gum &>/dev/null; then
     log_error "gum is not available for interactive input"
     return 1
   fi
-  
+
   local args=("gum" "input" "--prompt" "$prompt")
   if [[ -n "$placeholder" ]]; then
     args+=(--placeholder "$placeholder")
   fi
-  
-  local input
-  input=$(gum_safe "${args[@]}")
-  local exit_code=$?
-  
+
+  local exit_code
+
+  # Temporarily disable exit on error for interactive command
+  # Don't capture output - let it pass through directly
+  set +e
+  "${args[@]}"
+  exit_code=$?
+  set -e
+
   if [[ $exit_code -ne 0 ]]; then
     log_verbose "User cancelled input"
     return 1
   fi
-  
-  echo "$input"
+
   return 0
 }
 
@@ -231,7 +244,7 @@ ui_input() {
 ui_spinner() {
   local title="$1"
   local command="$2"
-  
+
   if command -v gum &>/dev/null; then
     gum spin --title "$title" -- bash -c "$command"
   else
@@ -319,26 +332,26 @@ ui_show_summary() {
   local success="$2"
   local skipped="$3"
   local errors="$4"
-  
+
   ui_title "Operation Summary"
   echo ""
-  
+
   ui_info "Total Queries: $total"
-  
+
   if [[ $success -gt 0 ]]; then
     ui_success "Successfully Processed: $success"
   fi
-  
+
   if [[ $skipped -gt 0 ]]; then
     ui_warning "Skipped: $skipped"
   fi
-  
+
   if [[ $errors -gt 0 ]]; then
     ui_error "Errors: $errors"
   else
     ui_success "No errors!"
   fi
-  
+
   echo ""
 }
 
@@ -355,9 +368,9 @@ ui_query_header() {
   local current="$2"
   local total="$3"
   local rating="${4:-}"
-  
+
   ui_message "$COLOR_INFO" "Query $current of $total: $query"
-  
+
   if [[ -n "$rating" ]]; then
     ui_muted "  Rating: $rating"
   fi
@@ -376,13 +389,13 @@ ui_query_header() {
 ui_select_match() {
   local query="$1"
   local -n options_ref="$2"
-  
+
   # Add control options
   local all_options=("${options_ref[@]}")
   all_options+=("${SYMBOL_MANUAL} Manual query")
   all_options+=("${SYMBOL_SKIP} Skip without marker")
   all_options+=("${SYMBOL_MARKER} Skip with marker")
-  
+
   ui_choose "Select file for: $query" "${all_options[@]}"
 }
 

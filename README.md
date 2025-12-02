@@ -46,7 +46,7 @@ organizer/
    ```bash
    # Required
    sudo apt install gum python3 unzip
-   
+
    # Optional (for additional archive formats)
    sudo apt install p7zip-full unrar
    ```

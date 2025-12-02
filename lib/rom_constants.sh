@@ -2,6 +2,8 @@
 # ROM Organizer - Constants and Configuration
 # This file contains all constants, default values, and magic numbers
 
+# shellcheck disable=SC2034  # Constants used by sourcing scripts
+
 # Exit codes (only set if not already defined)
 if [[ -z "${EXIT_SUCCESS:-}" ]]; then
   readonly EXIT_SUCCESS=0
@@ -67,7 +69,7 @@ declare -gA ROM_EXTENSIONS=(
   [prg]="NES Program"
   [chr]="NES Character"
   [unh]="NES Unheadered"
-  
+
   # Super Nintendo
   [smc]="Super Nintendo"
   [sfc]="Super Famicom"
@@ -82,7 +84,7 @@ declare -gA ROM_EXTENSIONS=(
   [gd7]="Game Doctor SF7"
   [usa]="Super Nintendo (USA)"
   [eur]="Super Nintendo (EUR)"
-  
+
   # Game Boy
   [gb]="Game Boy"
   [gbc]="Game Boy Color"
@@ -90,21 +92,21 @@ declare -gA ROM_EXTENSIONS=(
   [cgb]="Game Boy Color"
   [dmg]="Game Boy DMG"
   [gba]="Game Boy Advance"
-  
+
   # Nintendo 64
   [n64]="Nintendo 64"
   [z64]="Nintendo 64 (BigEndian)"
   [v64]="Nintendo 64 (ByteSwapped)"
   [u64]="Nintendo 64"
-  
+
   # GameCube
   [gcm]="GameCube"
   [rvz]="GameCube/Wii RVZ"
-  
+
   # Wii
   [wbfs]="Wii Backup File System"
   [wad]="Wii Archive"
-  
+
   # Sega
   [sms]="Sega Master System"
   [gg]="Game Gear"
@@ -117,13 +119,13 @@ declare -gA ROM_EXTENSIONS=(
   [68k]="Genesis 68K"
   [cdi]="CD-i"
   [gdi]="Dreamcast GD-ROM"
-  
+
   # Sony PlayStation
   [pbp]="PlayStation Portable"
   [cue]="CD Image Cue Sheet"
   [chd]="Compressed Hunks of Data"
   [ciso]="Compressed ISO"
-  
+
   # Atari
   [a26]="Atari 2600"
   [a52]="Atari 5200"
@@ -132,7 +134,7 @@ declare -gA ROM_EXTENSIONS=(
   [cas]="Atari Cassette"
   [xfd]="Atari XFD"
   [dcm]="Atari DCM"
-  
+
   # Generic
   [rom]="Generic ROM"
   [bin]="Binary ROM"

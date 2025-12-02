@@ -2,15 +2,6 @@
 # ROM Organizer - State Management
 # This file handles session state, operation logging, and resume capability
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-# shellcheck source=lib/rom_utils.sh
-source "$SCRIPT_DIR/rom_utils.sh"
-# shellcheck source=lib/rom_ui.sh
-source "$SCRIPT_DIR/rom_ui.sh"
-
 # Session state file location
 declare -g STATE_FILE=""
 declare -g SESSION_ID=""

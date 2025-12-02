@@ -2,12 +2,8 @@
 # ROM Organizer - Utility Functions
 # This file contains shared utility functions and helpers
 
-# Source constants
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-
 # Global state
+# shellcheck disable=SC2034  # DRY_RUN used by sourcing scripts
 declare -g VERBOSE=false
 declare -g DRY_RUN=false
 declare -g LOG_FILE=""
@@ -27,7 +23,7 @@ init_logging() {
     LOG_FILE="$(mktemp -t rom-organizer.XXXXXX.log)"
     TEMP_FILES["$LOG_FILE"]=1
   fi
-  
+
   log_info "ROM Organizer v${ROM_ORGANIZER_VERSION} (${ROM_ORGANIZER_DATE})"
   log_info "Log file: $LOG_FILE"
 }
@@ -42,12 +38,12 @@ init_logging() {
 #######################################
 log_verbose() {
   local message="$*"
-  
+
   # Always write to log file if available
   if [[ -n "$LOG_FILE" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [VERBOSE] $message" >> "$LOG_FILE"
   fi
-  
+
   # Display to user only if verbose mode is on
   if [[ "$VERBOSE" == true ]]; then
     echo "[VERBOSE] $message" >&2
@@ -63,11 +59,11 @@ log_verbose() {
 #######################################
 log_info() {
   local message="$*"
-  
+
   if [[ -n "$LOG_FILE" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $message" >> "$LOG_FILE"
   fi
-  
+
   echo "[INFO] $message" >&2
 }
 
@@ -80,11 +76,11 @@ log_info() {
 #######################################
 log_warning() {
   local message="$*"
-  
+
   if [[ -n "$LOG_FILE" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] $message" >> "$LOG_FILE"
   fi
-  
+
   echo "[WARNING] $message" >&2
 }
 
@@ -97,11 +93,11 @@ log_warning() {
 #######################################
 log_error() {
   local message="$*"
-  
+
   if [[ -n "$LOG_FILE" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $message" >> "$LOG_FILE"
   fi
-  
+
   echo "[ERROR] $message" >&2
 }
 
@@ -116,16 +112,18 @@ log_error() {
 error_handler() {
   local line_number="$1"
   local function_name="${2:-main}"
-  
-  log_error "Error occurred in $function_name at line $line_number"
+  local exit_code="$?"
+
+  log_error "Error occurred in $function_name at line $line_number (exit code: $exit_code)"
+  log_error "Last command: $BASH_COMMAND"
   log_error "Cleaning up and exiting..."
-  
+
   cleanup_temp_files
-  
+
   if command -v gum &>/dev/null; then
     gum style --foreground "$COLOR_ERROR" "Error on line $line_number in $function_name"
   fi
-  
+
   exit "$EXIT_GENERAL_ERROR"
 }
 
@@ -137,14 +135,17 @@ error_handler() {
 #######################################
 cleanup_temp_files() {
   log_verbose "Cleaning up temporary files..."
-  
-  for temp_file in "${!TEMP_FILES[@]}"; do
-    if [[ -f "$temp_file" ]]; then
-      rm -f "$temp_file" 2>/dev/null || true
-      log_verbose "Removed temp file: $temp_file"
-    fi
-  done
-  
+
+  # Safely iterate over temp files if array exists
+  if declare -p TEMP_FILES &>/dev/null; then
+    for temp_file in "${!TEMP_FILES[@]}"; do
+      if [[ -f "$temp_file" ]]; then
+        rm -f "$temp_file" 2>/dev/null || true
+        log_verbose "Removed temp file: $temp_file"
+      fi
+    done
+  fi
+
   # Clear the array
   TEMP_FILES=()
 }
@@ -188,27 +189,27 @@ create_temp_file() {
 #######################################
 validate_query() {
   local query="$1"
-  
+
   # Check if query is empty
   if [[ -z "$query" ]]; then
     log_verbose "Query validation failed: empty query"
     return 1
   fi
-  
+
   # Check query length
   if [[ ${#query} -gt $MAX_QUERY_LENGTH ]]; then
     log_warning "Query is too long (${#query} > $MAX_QUERY_LENGTH): $query"
     return 1
   fi
-  
+
   # Trim whitespace
   query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  
+
   if [[ -z "$query" ]]; then
     log_verbose "Query validation failed: only whitespace"
     return 1
   fi
-  
+
   return 0
 }
 
@@ -221,19 +222,19 @@ validate_query() {
 #######################################
 validate_file_path() {
   local file_path="$1"
-  
+
   # Check if path is empty
   if [[ -z "$file_path" ]]; then
     log_verbose "File path validation failed: empty path"
     return 1
   fi
-  
+
   # Check if path exists
   if [[ ! -e "$file_path" ]]; then
     log_verbose "File path validation failed: does not exist: $file_path"
     return 1
   fi
-  
+
   return 0
 }
 
@@ -248,19 +249,19 @@ validate_file_path() {
 validate_system() {
   local system="$1"
   local base_dir="$2"
-  
+
   # Check if system is empty
   if [[ -z "$system" ]]; then
     log_verbose "System validation failed: empty system name"
     return 1
   fi
-  
+
   # Check if system directory exists in Official
   if [[ ! -d "$base_dir/Official/$system" ]]; then
     log_verbose "System validation failed: directory not found: $base_dir/Official/$system"
     return 1
   fi
-  
+
   return 0
 }
 
@@ -275,19 +276,19 @@ validate_system() {
 validate_rating() {
   local rating="$1"
   local expected_digits="${2:-$MIN_RATING_DIGITS}"
-  
+
   # Check if rating is numeric
   if [[ ! "$rating" =~ ^[0-9]+$ ]]; then
     log_verbose "Rating validation failed: not numeric: $rating"
     return 1
   fi
-  
+
   # Check digit count
   if [[ ${#rating} -ne $expected_digits ]]; then
     log_verbose "Rating validation failed: expected $expected_digits digits, got ${#rating}"
     return 1
   fi
-  
+
   return 0
 }
 
@@ -300,7 +301,10 @@ validate_rating() {
 #######################################
 trim() {
   local str="$1"
-  echo "$str" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+  # Use shell parameter expansion instead of sed for better performance
+  str="${str#"${str%%[![:space:]]*}"}"  # Remove leading whitespace
+  str="${str%"${str##*[![:space:]]}"}"  # Remove trailing whitespace
+  echo "$str"
 }
 
 #######################################
@@ -339,12 +343,12 @@ is_rom_file() {
   local filename="$1"
   local ext
   ext=$(get_extension "$filename")
-  
+
   # Check if extension is in ROM_EXTENSIONS
   if [[ -n "${ROM_EXTENSIONS[$ext]:-}" ]]; then
     return 0
   fi
-  
+
   return 1
 }
 
@@ -359,13 +363,13 @@ is_archive_file() {
   local filename="$1"
   local ext
   ext=$(get_extension "$filename")
-  
+
   for archive_ext in "${ARCHIVE_EXTENSIONS[@]}"; do
     if [[ "$ext" == "$archive_ext" || "$filename" == *".$archive_ext" ]]; then
       return 0
     fi
   done
-  
+
   return 1
 }
 
@@ -378,7 +382,7 @@ is_archive_file() {
 #######################################
 format_size() {
   local size="$1"
-  
+
   if [[ $size -lt 1024 ]]; then
     echo "${size}B"
   elif [[ $size -lt $((1024 * 1024)) ]]; then
@@ -400,13 +404,13 @@ format_size() {
 calculate_rating_digits() {
   local total="$1"
   local digits=${#total}
-  
+
   if [[ $digits -lt $MIN_RATING_DIGITS ]]; then
     digits=$MIN_RATING_DIGITS
   elif [[ $digits -gt $MAX_RATING_DIGITS ]]; then
     digits=$MAX_RATING_DIGITS
   fi
-  
+
   echo "$digits"
 }
 
@@ -426,6 +430,6 @@ format_rating() {
 
 # Set up error traps (only in production, not in tests)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ -z "${TEST_MODE:-}" ]]; then
-  trap 'error_handler $LINENO "${FUNCNAME[0]}"' ERR
+  trap 'error_handler $LINENO "${FUNCNAME[0]:-main}"' ERR
   trap cleanup_temp_files EXIT
 fi

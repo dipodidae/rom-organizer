@@ -2,13 +2,6 @@
 # ROM Organizer - Configuration Management
 # This file handles configuration loading and validation
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-# shellcheck source=lib/rom_utils.sh
-source "$SCRIPT_DIR/rom_utils.sh"
-
 # Configuration variables
 declare -g CONFIG_FILE=""
 declare -gA CONFIG=(
@@ -31,36 +24,36 @@ declare -gA CONFIG=(
 #######################################
 load_config() {
   local config_file="$1"
-  
+
   if [[ ! -f "$config_file" ]]; then
     log_warning "Config file not found: $config_file"
     return 1
   fi
-  
+
   log_verbose "Loading configuration from: $config_file"
-  
+
   # Read configuration (simple KEY=VALUE format)
   while IFS='=' read -r key value; do
     # Skip comments and empty lines
     [[ "$key" =~ ^[[:space:]]*# ]] && continue
     [[ -z "$key" ]] && continue
-    
+
     # Trim whitespace
     key=$(trim "$key")
     value=$(trim "$value")
-    
+
     # Remove quotes from value
     value="${value//\"/}"
     value="${value//\'/}"
-    
+
     # Set configuration value
     CONFIG[$key]="$value"
-    
+
     log_verbose "Config: $key = $value"
   done < "$config_file"
-  
+
   CONFIG_FILE="$config_file"
-  
+
   log_info "Configuration loaded successfully"
   return 0
 }
@@ -69,8 +62,9 @@ load_config() {
 # Load default configuration
 #######################################
 load_default_config() {
-  local default_config="$(dirname "$SCRIPT_DIR")/config/defaults.conf"
-  
+  local default_config
+  default_config="$SCRIPT_DIR/config/defaults.conf"
+
   if [[ -f "$default_config" ]]; then
     load_config "$default_config"
   else
@@ -83,7 +77,7 @@ load_default_config() {
 #######################################
 load_user_config() {
   local user_config="${HOME}/.config/rom-organizer/config.conf"
-  
+
   if [[ -f "$user_config" ]]; then
     log_info "Loading user configuration"
     load_config "$user_config"
@@ -103,7 +97,7 @@ load_user_config() {
 get_config() {
   local key="$1"
   local default="${2:-}"
-  
+
   if [[ -n "${CONFIG[$key]:-}" ]]; then
     echo "${CONFIG[$key]}"
   else
@@ -120,7 +114,7 @@ get_config() {
 set_config() {
   local key="$1"
   local value="$2"
-  
+
   CONFIG[$key]="$value"
   log_verbose "Config updated: $key = $value"
 }
@@ -132,28 +126,28 @@ set_config() {
 #######################################
 validate_config() {
   local valid=true
-  
+
   # Validate fuzzy threshold
   local threshold="${CONFIG[fuzzy_threshold]}"
   if ! [[ "$threshold" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     log_error "Invalid fuzzy_threshold: $threshold"
     valid=false
   fi
-  
+
   # Validate max results
   local max_results="${CONFIG[max_results]}"
   if ! [[ "$max_results" =~ ^[0-9]+$ ]]; then
     log_error "Invalid max_results: $max_results"
     valid=false
   fi
-  
+
   # Validate cleanup days
   local cleanup_days="${CONFIG[cleanup_sessions_days]}"
   if ! [[ "$cleanup_days" =~ ^[0-9]+$ ]]; then
     log_error "Invalid cleanup_sessions_days: $cleanup_days"
     valid=false
   fi
-  
+
   if [[ "$valid" == true ]]; then
     log_verbose "Configuration validation passed"
     return 0
@@ -170,9 +164,9 @@ validate_config() {
 #######################################
 save_config() {
   local output_file="$1"
-  
+
   mkdir -p "$(dirname "$output_file")"
-  
+
   cat > "$output_file" <<EOF
 # ROM Organizer Configuration
 # Generated: $(date '+%Y-%m-%d %H:%M:%S')
@@ -202,7 +196,7 @@ cleanup_sessions_days=${CONFIG[cleanup_sessions_days]}
 create_skip_markers=${CONFIG[create_skip_markers]}
 
 EOF
-  
+
   log_info "Configuration saved to: $output_file"
 }
 
@@ -212,18 +206,18 @@ EOF
 #######################################
 init_config() {
   log_verbose "Initializing configuration system"
-  
+
   # Load defaults
   load_default_config
-  
+
   # Load user config (overrides defaults)
   load_user_config
-  
+
   # Validate configuration
   if ! validate_config; then
     log_warning "Configuration has errors, some features may not work correctly"
   fi
-  
+
   return 0
 }
 
@@ -233,11 +227,11 @@ init_config() {
 show_config() {
   echo "Current Configuration:"
   echo "======================"
-  
+
   for key in "${!CONFIG[@]}"; do
     echo "  $key = ${CONFIG[$key]}"
   done
-  
+
   echo ""
   echo "Config file: ${CONFIG_FILE:-none}"
 }

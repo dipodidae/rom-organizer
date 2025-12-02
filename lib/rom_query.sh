@@ -2,19 +2,6 @@
 # ROM Organizer - Query Processing
 # This file contains query processing logic including shared titles and manual queries
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-# shellcheck source=lib/rom_utils.sh
-source "$SCRIPT_DIR/rom_utils.sh"
-# shellcheck source=lib/rom_ui.sh
-source "$SCRIPT_DIR/rom_ui.sh"
-# shellcheck source=lib/rom_core.sh
-source "$SCRIPT_DIR/rom_core.sh"
-# shellcheck source=lib/rom_search.sh
-source "$SCRIPT_DIR/rom_search.sh"
-
 #######################################
 # Detect if query contains shared titles (separated by /, &, +, or "and")
 # Arguments:
@@ -252,8 +239,13 @@ handle_multi_select() {
   fi
   
   set +e
-  selected_items=$(gum choose --no-limit --header "Select games for shared rank $rating:" "${options_ref[@]}")
+  # Don't capture output - let it flow to a file instead
+  local temp_selections
+  temp_selections=$(mktemp)
+  gum choose --no-limit --header "Select games for shared rank $rating:" "${options_ref[@]}" > "$temp_selections"
   local exit_code=$?
+  selected_items=$(cat "$temp_selections")
+  rm -f "$temp_selections"
   set -e
   
   if [[ $exit_code -ne 0 || -z "$selected_items" ]]; then

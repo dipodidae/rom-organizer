@@ -2,15 +2,6 @@
 # ROM Organizer - Core Operations
 # This file contains ROM file operations: detection, extraction, copying, rank checking
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/rom_constants.sh
-source "$SCRIPT_DIR/rom_constants.sh"
-# shellcheck source=lib/rom_utils.sh
-source "$SCRIPT_DIR/rom_utils.sh"
-# shellcheck source=lib/rom_ui.sh
-source "$SCRIPT_DIR/rom_ui.sh"
-
 # Global directory paths (set by config)
 declare -g COLLECTIONS_DIR=""
 
