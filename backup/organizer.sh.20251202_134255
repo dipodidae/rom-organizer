@@ -1,0 +1,1351 @@
+#!/bin/bash
+
+# ROM Collection Organizer
+# Organizes ROMs based on text file queries using Gum for UI
+#
+# Usage: $0 [options]
+# Options:
+#   -h, --help    Show this help message
+#   -v, --verbose Enable verbose output
+#
+# Environment Variables:
+#   ROM_BASE_DIR  Override the base directory for ROM collection
+#
+# Requirements:
+#   - gum (for interactive UI)
+#   - unzip (for ZIP archives)
+#   - 7z (optional, for 7z archives)
+#   - unrar (optional, for RAR archives)
+
+set -euo pipefail # Exit on error, undefined variables, pipe failures
+
+# Global settings
+VERBOSE=false
+
+# Function to show help
+show_help() {
+  cat <<'EOF'
+ROM Collection Organizer
+
+This script helps organize ROM collections by searching for games based on
+text file queries and copying them to organized collections.
+
+Usage: organizer.sh [options]
+
+Options:
+  -h, --help     Show this help message
+  -v, --verbose  Enable verbose output
+
+Environment Variables:
+  ROM_BASE_DIR   Override the base directory for ROM collection
+                 (default: auto-detect from script location)
+
+The script expects this directory structure:
+  Base/
+  ├── Official/           (Official ROM releases by system)
+  ├── Translations/       (Translated ROMs by system)
+  ├── Lists/             (Text files with game queries)
+  └── Collections/       (Output directory for organized collections)
+
+Requirements:
+  - gum (for interactive UI)
+  - python3 (for high-performance search engine)
+  - unzip (for ZIP archives)
+  - 7z (optional, for 7z archives)
+  - unrar (optional, for RAR archives)
+
+Python Performance Packages (recommended):
+  - rapidfuzz: pip3 install rapidfuzz (ultra-fast fuzzy matching)
+  - regex: pip3 install regex (enhanced regex support)
+
+Examples:
+  ./organizer.sh                    # Interactive mode
+  ROM_BASE_DIR=/path/to/roms ./organizer.sh  # Custom base directory
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  -h | --help)
+    show_help
+    exit 0
+    ;;
+  -v | --verbose)
+    VERBOSE=true
+    shift
+    ;;
+  *)
+    gum style --foreground 1 "Unknown option: $1"
+    gum style --foreground 8 "Use -h or --help for usage information"
+    exit 1
+    ;;
+  esac
+done
+
+#######################################
+# Log verbose messages when VERBOSE mode is enabled.
+# Globals:
+#   VERBOSE
+# Arguments:
+#   Message to log
+#######################################
+log_verbose() {
+  if [[ "$VERBOSE" == true ]]; then
+    gum style --foreground 8 "[VERBOSE] $*"
+  fi
+}
+
+#######################################
+# Check if required tools and dependencies are installed.
+# Verifies gum, unzip, python3, and ROM search engine availability.
+# Also checks for optional performance packages.
+# Globals:
+#   PYTHON_CMD
+#   VERBOSE
+# Outputs:
+#   Status messages to STDOUT via gum
+#   Exits with code 1 if required dependencies are missing
+#######################################
+check_dependencies() {
+  local missing_deps=()
+
+  if ! command -v gum &>/dev/null; then
+    missing_deps+=("gum")
+  fi
+
+  if ! command -v unzip &>/dev/null; then
+    missing_deps+=("unzip")
+  fi
+
+  if ! command -v python3 &>/dev/null; then
+    missing_deps+=("python3")
+  fi
+
+  if [[ ${#missing_deps[@]} -gt 0 ]]; then
+    # Can't use gum if it's missing, so use echo
+    echo "Error: The following required tools are not installed: ${missing_deps[*]}"
+    echo "Please install them first."
+    exit 1
+  fi
+
+  # Check if ROM search engine is available
+  local rom_search_script
+  rom_search_script="$(dirname "${BASH_SOURCE[0]}")/rom_search.py"
+  if [[ ! -f "$rom_search_script" ]]; then
+    gum style --foreground 1 "Error: ROM search engine not found at $rom_search_script"
+    exit 1
+  fi
+
+  # Check for virtual environment with performance packages
+  local venv_python
+  venv_python="$(dirname "${BASH_SOURCE[0]}")/rom_env/bin/python"
+  if [[ -f "$venv_python" ]]; then
+    PYTHON_CMD="$venv_python"
+    log_verbose "Using virtual environment Python: $PYTHON_CMD"
+  else
+    PYTHON_CMD="python3"
+    log_verbose "Using system Python: $PYTHON_CMD"
+  fi
+
+  # Test if Python search engine works
+  if ! "$PYTHON_CMD" "$rom_search_script" --help &>/dev/null; then
+    gum style --foreground 1 "Error: ROM search engine is not working properly"
+    if [[ "$PYTHON_CMD" == "python3" ]]; then
+      gum style --foreground 8 "Try creating a virtual environment and installing packages:"
+      gum style --foreground 8 "  cd Scripts && python3 -m venv rom_env"
+      gum style --foreground 8 "  ./rom_env/bin/pip install rapidfuzz regex"
+    fi
+    exit 1
+  fi
+
+  log_verbose "Using high-performance Python search engine"
+  gum style --foreground 2 "✓ Python-based ROM search engine loaded"
+
+  # Check for optional performance packages
+  if "$PYTHON_CMD" -c "import rapidfuzz" &>/dev/null; then
+    gum style --foreground 2 "✓ rapidfuzz available for ultra-fast fuzzy matching"
+  else
+    gum style --foreground 3 "Note: Install 'rapidfuzz' for even faster searches"
+    if [[ "$PYTHON_CMD" == "python3" ]]; then
+      gum style --foreground 8 "  cd Scripts && python3 -m venv rom_env && ./rom_env/bin/pip install rapidfuzz"
+    fi
+  fi
+
+  # Optional tools - warn but don't exit
+  local optional_missing=()
+  if ! command -v 7z &>/dev/null; then
+    optional_missing+=("7z")
+  fi
+  if ! command -v unrar &>/dev/null; then
+    optional_missing+=("unrar")
+  fi
+
+  if [[ ${#optional_missing[@]} -gt 0 ]]; then
+    gum style --foreground 3 "Warning: Optional tools not found: ${optional_missing[*]}"
+    gum style --foreground 8 "Some archive formats may not be supported."
+  fi
+}
+
+check_dependencies
+
+# Configuration - Auto-detect base directory if not set
+if [[ -n "${ROM_BASE_DIR:-}" ]]; then
+  BASE_DIR="$ROM_BASE_DIR"
+  log_verbose "Using ROM_BASE_DIR: $BASE_DIR"
+else
+  # Try to auto-detect base directory
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  BASE_DIR="$(dirname "$SCRIPT_DIR")"
+  log_verbose "Auto-detected base directory: $BASE_DIR"
+fi
+
+ROMS_DIR="$BASE_DIR"
+OFFICIAL_DIR="$ROMS_DIR/Official"
+TRANSLATIONS_DIR="$ROMS_DIR/Translations"
+LISTS_DIR="$ROMS_DIR/Lists"
+COLLECTIONS_DIR="$ROMS_DIR/Collections"
+
+log_verbose "Configuration:"
+log_verbose "  BASE_DIR: $BASE_DIR"
+log_verbose "  OFFICIAL_DIR: $OFFICIAL_DIR"
+log_verbose "  TRANSLATIONS_DIR: $TRANSLATIONS_DIR"
+log_verbose "  LISTS_DIR: $LISTS_DIR"
+log_verbose "  COLLECTIONS_DIR: $COLLECTIONS_DIR"
+
+#######################################
+# Check if a file is a ROM file based on extension.
+# Arguments:
+#   Filename to check
+# Returns:
+#   0 if file is a ROM, 1 otherwise
+#######################################
+is_rom_file() {
+  local filename="$1"
+  local ext
+  ext="${filename##*.}"
+  ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+  # Common ROM file extensions - specific extensions first
+  case "$ext" in
+    # Nintendo NES/Famicom
+    nes|fds|nsf|unf|unif|pal|prg|chr|unh) return 0 ;;
+    # Super Nintendo - specific extensions
+    smc|sfc|fig|swc|bs|dx2|mgd|mgh|ufo|gd3|gd7|usa|eur) return 0 ;;
+    # Game Boy
+    gb|gbc|sgb|cgb|dmg) return 0 ;;
+    # Nintendo 64 - specific extensions
+    n64|z64|v64|u64) return 0 ;;
+    # GameCube
+    gcm|rvz) return 0 ;;
+    # Wii - specific extensions
+    wbfs|wad) return 0 ;;
+    # Sega - specific extensions
+    sms|gg|md|gen|32x|scd|sg|pco|68k|cdi|gdi) return 0 ;;
+    # Sony PlayStation - specific extensions
+    pbp) return 0 ;;
+    # Atari - specific extensions
+    a26|a52|a78|atr|cas|xfd|dcm) return 0 ;;
+    # Generic ROM extensions (shared across multiple systems)
+    rom|bin|img|iso|cue|chd|st|ciso) return 0 ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+#######################################
+# Gather matching ROM files using Python search engine.
+# Globals:
+#   BASE_DIR
+#   PYTHON_CMD
+#   VERBOSE
+# Arguments:
+#   Query string to search for
+#   System name to search within
+# Outputs:
+#   Pipe-delimited display_name|file_path pairs to STDOUT
+#######################################
+gather_matches() {
+  local query="$1"
+  local system="$2"
+
+  log_verbose "Gathering matches for query '$query' in system '$system' using Python search engine"
+
+  local rom_search_script
+  rom_search_script="$(dirname "${BASH_SOURCE[0]}")/rom_search.py"
+  local cache_dir="$BASE_DIR/.rom_cache"
+
+  # Create cache directory if it doesn't exist
+  mkdir -p "$cache_dir"
+
+  # Run Python search engine with appropriate verbosity
+  local python_args=(
+    "$rom_search_script"
+    "$BASE_DIR"
+    "$query"
+    "$system"
+    --cache-dir="$cache_dir"
+    --max-results=100
+    --fuzzy-threshold=15.0
+  )
+
+  if [[ "$VERBOSE" == true ]]; then
+    python_args+=(--verbose)
+  fi
+
+  log_verbose "Running: $PYTHON_CMD ${python_args[*]}"
+
+  # Execute Python search and capture results
+  "$PYTHON_CMD" "${python_args[@]}" 2>/dev/null || {
+    log_verbose "Python search failed, no matches found"
+    return 0
+  }
+}
+
+#######################################
+# Extract ROM from archive file.
+# Supports ZIP, 7z, and RAR archives.
+# Arguments:
+#   Archive file path
+#   Destination directory
+# Returns:
+#   0 on success, 1 on failure
+#######################################
+extract_rom() {
+  local archive="$1"
+  local dest_dir="$2"
+  local temp_dir
+  temp_dir=$(mktemp -d) || {
+    gum style --foreground 1 "Failed to create temporary directory"
+    return 1
+  }
+
+  # Ensure cleanup on exit
+  trap 'rm -rf "${temp_dir}"' EXIT
+
+  local ext
+  ext="${archive##*.}"
+  ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+  case "$ext" in
+  zip)
+    if ! unzip -q "$archive" -d "$temp_dir"; then
+      gum style --foreground 1 "Failed to extract ZIP file: $archive"
+      return 1
+    fi
+    ;;
+  7z)
+    if ! command -v 7z &>/dev/null; then
+      gum style --foreground 1 "7z not available for extracting: $archive"
+      return 1
+    fi
+    if ! 7z x "$archive" -o"$temp_dir" >/dev/null 2>&1; then
+      gum style --foreground 1 "Failed to extract 7z file: $archive"
+      return 1
+    fi
+    ;;
+  rar)
+    if ! command -v unrar &>/dev/null; then
+      gum style --foreground 1 "unrar not available for extracting: $archive"
+      return 1
+    fi
+    if ! unrar x "$archive" "$temp_dir/" >/dev/null 2>&1; then
+      gum style --foreground 1 "Failed to extract RAR file: $archive"
+      return 1
+    fi
+    ;;
+  *)
+    gum style --foreground 1 "Unsupported archive format: $ext"
+    return 1
+    ;;
+  esac
+
+  # Find and copy ROM files
+  local rom_found=false
+  while IFS= read -r -d '' file; do
+    local basename
+    basename=$(basename "$file")
+    if is_rom_file "$basename"; then
+      if cp "$file" "$dest_dir/"; then
+        rom_found=true
+      else
+        gum style --foreground 1 "Failed to copy ROM file: $file"
+      fi
+    fi
+  done < <(find "$temp_dir" -type f -print0 2>/dev/null)
+
+  rm -rf "$temp_dir"
+
+  if [[ "$rom_found" == true ]]; then
+    return 0
+  else
+    gum style --foreground 1 "No ROM files found in archive: $archive"
+    return 1
+  fi
+}
+
+#######################################
+# Copy ROM file to collection directory.
+# Handles archives by extracting ROMs and regular ROM files directly.
+# Globals:
+#   COLLECTIONS_DIR
+# Arguments:
+#   Source file path
+#   System name
+#   Collection name
+#   Rating (optional)
+#   Prepend rating flag (optional)
+# Returns:
+#   0 on success, 1 on failure
+#######################################
+copy_file() {
+  local source="$1"
+  local system="$2"
+  local collection="$3"
+  local rating="${4:-}"
+  local prepend_rating="${5:-true}"
+
+  local dest_dir="$COLLECTIONS_DIR/$system/$collection"
+
+  if ! mkdir -p "$dest_dir"; then
+    gum style --foreground 1 "✗ Failed to create directory: $dest_dir"
+    return 1
+  fi
+
+  local basename
+  basename=$(basename "$source")
+  local ext
+  ext="${basename##*.}"
+  ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+  # Generate final filename with optional rating prefix
+  local final_basename="$basename"
+  if [[ "$prepend_rating" == "true" && -n "$rating" ]]; then
+    local name_without_ext="${basename%.*}"
+    local file_ext="${basename##*.}"
+
+    # Handle files without extensions
+    if [[ "$name_without_ext" == "$file_ext" ]]; then
+      final_basename="${rating}-${basename}"
+    else
+      final_basename="${rating}-${name_without_ext}.${file_ext}"
+    fi
+  fi
+
+  if [[ "$ext" == "zip" || "$ext" == "7z" || "$ext" == "rar" ]]; then
+    gum style --foreground 8 "Extracting $basename..."
+
+    # For archives, we need to extract first, then rename the extracted files
+    local temp_dir
+    temp_dir=$(mktemp -d) || {
+      gum style --foreground 1 "Failed to create temporary directory"
+      return 1
+    }
+
+    if extract_rom "$source" "$temp_dir"; then
+      # Find extracted ROM files and copy them with rating prefix
+      local rom_found=false
+      while IFS= read -r -d '' extracted_file; do
+        local extracted_basename
+        extracted_basename=$(basename "$extracted_file")
+        if is_rom_file "$extracted_basename"; then
+          local final_extracted_name="$extracted_basename"
+          if [[ "$prepend_rating" == "true" && -n "$rating" ]]; then
+            local name_without_ext="${extracted_basename%.*}"
+            local file_ext="${extracted_basename##*.}"
+
+            if [[ "$name_without_ext" == "$file_ext" ]]; then
+              final_extracted_name="${rating}-${extracted_basename}"
+            else
+              final_extracted_name="${rating}-${name_without_ext}.${file_ext}"
+            fi
+          fi
+
+          if cp "$extracted_file" "$dest_dir/$final_extracted_name"; then
+            rom_found=true
+          else
+            gum style --foreground 1 "Failed to copy extracted ROM file: $extracted_file"
+          fi
+        fi
+      done < <(find "$temp_dir" -type f -print0 2>/dev/null)
+
+      rm -rf "$temp_dir"
+
+      if [[ "$rom_found" == true ]]; then
+        gum style --foreground 2 "✓ Extracted $basename to $dest_dir"
+      else
+        gum style --foreground 1 "✗ No ROM files found in archive: $basename"
+        return 1
+      fi
+    else
+      rm -rf "$temp_dir"
+      gum style --foreground 1 "✗ Failed to extract ROM from $basename"
+      return 1
+    fi
+  else
+    if cp "$source" "$dest_dir/$final_basename"; then
+      gum style --foreground 2 "✓ Copied $basename to $dest_dir"
+      if [[ "$prepend_rating" == "true" && -n "$rating" ]]; then
+        gum style --foreground 8 "  → Renamed to: $final_basename"
+      fi
+    else
+      gum style --foreground 1 "✗ Failed to copy $basename"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# Function to check if a ROM with a specific rank already exists in the destination folder
+#######################################
+# Check if a ROM with the given rank already exists in collection.
+# Globals:
+#   COLLECTIONS_DIR
+# Arguments:
+#   System name
+#   Collection name
+#   Rating/rank number
+# Returns:
+#   0 if rank exists, 1 otherwise
+#######################################
+check_rank_exists() {
+  local system="$1"
+  local collection="$2"
+  local rating="$3"
+
+  local dest_dir="$COLLECTIONS_DIR/$system/$collection"
+
+  log_verbose "Checking if rank $rating exists in: $dest_dir"
+
+  # If destination directory doesn't exist, no ROM exists
+  if [[ ! -d "$dest_dir" ]]; then
+    log_verbose "Destination directory does not exist, no ROM with rank $rating found"
+    return 1
+  fi
+
+  # Check if any file starts with the rating pattern (e.g., "001-")
+  local pattern="${rating}-*"
+  if compgen -G "$dest_dir/$pattern" >/dev/null 2>&1; then
+    log_verbose "Found existing ROM(s) with rank $rating in destination"
+    return 0  # Found matching file(s)
+  else
+    log_verbose "No ROM with rank $rating found in destination"
+    return 1  # No matching files found
+  fi
+}
+
+# Function to process manual query
+#######################################
+# Process a manual query entered by the user.
+# Allows user to modify the query or skip it.
+# Arguments:
+#   Original query string
+#   System name
+#   Collection name
+#   Rating (optional)
+#   Prepend rating flag (optional)
+# Returns:
+#   0 on success or skip, 1 on failure
+#######################################
+process_manual_query() {
+  local original_query="$1"
+  local system="$2"
+  local collection="$3"
+  local rating="${4:-}"
+  local prepend_rating="${5:-true}"
+
+  gum style --foreground 6 --bold "Original query: $original_query"
+  gum style --foreground 8 "Type 'skip' to skip this query and save a skipped marker"
+
+  # Temporarily disable exit on error for gum input
+  set +e
+  local new_query
+  new_query=$(gum input --placeholder "Enter modified query (or 'skip')..." --value "$original_query")
+  local gum_exit_code=$?
+  set -e
+
+  # Handle cancellation
+  if [[ $gum_exit_code -ne 0 || -z "$new_query" ]]; then
+    gum style --foreground 8 "Manual query cancelled, skipping without marker"
+    return 0
+  fi
+
+  # Check for skip command
+  if [[ "$new_query" == "skip" ]]; then
+    gum style --foreground 3 "Skipping query and saving skip marker"
+    create_skip_marker "$system" "$collection" "$original_query" "$rating"
+    return 0
+  fi
+
+  # Process the new query and handle any errors
+  if ! process_query "$new_query" "$system" "$collection" "$original_query" "$rating" "$prepend_rating"; then
+    log_verbose "Manual query processing failed, but continuing..."
+  fi
+}
+
+# Function to detect shared titles in a query
+#######################################
+# Detect if query contains shared titles (separated by /).
+# Arguments:
+#   Query string to check
+# Returns:
+#   0 if shared titles detected, 1 otherwise
+#######################################
+detect_shared_titles() {
+  local query="$1"
+
+  # Check for common sharing patterns
+  if [[ "$query" =~ [/\&+] || "$query" =~ [[:space:]]and[[:space:]] ]]; then
+    # Check for specific patterns
+    if [[ "$query" =~ [/\&+] ]]; then
+      # Split by slash, ampersand, or plus
+      log_verbose "Detected potential shared title with slash/ampersand pattern: $query"
+      return 0
+    elif [[ "$query" =~ [[:space:]]and[[:space:]] ]]; then
+      # Split by "and"
+      log_verbose "Detected potential shared title with 'and' pattern: $query"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Function to split query into multiple sub-queries
+#######################################
+# Split shared query into individual titles.
+# Arguments:
+#   Query string containing / separators
+# Outputs:
+#   Individual title per line to STDOUT
+#######################################
+split_shared_query() {
+  local query="$1"
+  local shared_queries=()
+
+  # Replace common connectors with a standard delimiter
+  local standardized_query
+  standardized_query=$(echo "$query" | sed 's/[\/\&+]/#/g' | sed 's/ and /#/g')
+
+  # Split by delimiter
+  IFS='#' read -ra parts <<< "$standardized_query"
+
+  # Trim whitespace from each part
+  for part in "${parts[@]}"; do
+    part=$(echo "$part" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ -n "$part" ]]; then
+      shared_queries+=("$part")
+    fi
+  done
+
+  # Return the array
+  echo "${shared_queries[@]}"
+}
+
+# Function to process shared title query
+#######################################
+# Process queries containing shared titles.
+# Searches for all related titles and allows selection.
+# Arguments:
+#   Query string
+#   System name
+#   Collection name
+#   Original query (optional)
+#   Rating (optional)
+#   Prepend rating flag (optional)
+# Returns:
+#   0 on success, 1 on failure
+#######################################
+process_shared_title_query() {
+  local query="$1"
+  local system="$2"
+  local collection="$3"
+  local original_query="${4:-$query}"
+  local rating="${5:-}"
+  local prepend_rating="${6:-true}"
+
+  local sub_queries=()
+  readarray -t sub_queries < <(split_shared_query "$query")
+  gum style --foreground 6 --bold "Processing shared title: $query"
+  gum style --foreground 8 "Detected ${#sub_queries[@]} related titles: ${sub_queries[*]}"
+
+  # Collect matches for all sub-queries
+  local all_options=()
+  local all_file_paths=()
+
+  for sub_query in "${sub_queries[@]}"; do
+    gum style --foreground 3 "Finding matches for: $sub_query"
+
+    local options=()
+    local file_paths=()
+
+    while IFS='|' read -r display_name file_path; do
+      if [[ -n "$display_name" && -n "$file_path" ]]; then
+        options+=("$display_name")
+        file_paths+=("$file_path")
+        all_options+=("[$sub_query] $display_name")
+        all_file_paths+=("$file_path")
+      fi
+    done < <(gather_matches "$sub_query" "$system")
+
+    if [[ ${#options[@]} -eq 0 ]]; then
+      gum style --foreground 1 "No matches found for: $sub_query"
+    else
+      gum style --foreground 2 "Found ${#options[@]} matches for: $sub_query"
+    fi
+  done
+
+  if [[ ${#all_options[@]} -eq 0 ]]; then
+    gum style --foreground 1 "No matches found for any title in: $query"
+    return 1
+  fi
+
+  # Add special option at the top
+  all_options=("🔄 [Shared Rank] Select multiple games" "${all_options[@]}" "🔍 Manual query" "⏭️ Skip without marker" "📝 Skip with marker")
+
+  local choice
+  # Temporarily disable exit on error for gum choose
+  set +e
+  choice=$(gum choose --header "Select for shared rank: $query" "${all_options[@]}")
+  local gum_exit_code=$?
+  set -e
+
+  # Handle cancellation
+  if [[ $gum_exit_code -ne 0 ]]; then
+    gum style --foreground 8 "Selection cancelled, skipping shared title: $query"
+    return 0
+  fi
+
+  case "$choice" in
+    "🔄 [Shared Rank] Select multiple games")
+      # Multi-select mode
+      gum style --foreground 5 "Select multiple games to share rank $rating"
+
+      set +e
+      local selected_items
+      selected_items=$(gum choose --no-limit --header "Select games for shared rank $rating:" "${all_options[@]:1}")
+      set -e
+
+      if [[ -z "$selected_items" ]]; then
+        gum style --foreground 8 "No games selected for shared rank, skipping"
+        return 0
+      fi
+      local success_count=0
+      while IFS= read -r selected; do
+        if [[ "$selected" == "🔍 Manual query" || "$selected" =~ ^⏭️ || "$selected" =~ ^📝 ]]; then
+          continue
+        fi
+
+        # Find index in the all_options array (offset by 1 because we added the special option)
+        local selected_index=-1
+        for i in "${!all_options[@]}"; do
+          if [[ $i -eq 0 ]]; then
+            continue  # Skip the special first option
+          fi
+          if [[ "${all_options[$i]}" == "$selected" ]]; then
+            selected_index=$((i - 1))
+            break
+          fi
+        done
+
+        if [[ $selected_index -ge 0 && $selected_index -lt ${#all_file_paths[@]} ]]; then
+          gum style --foreground 8 "Copying: ${selected#*] }"
+          if copy_file "${all_file_paths[$selected_index]}" "$system" "$collection" "$rating" "$prepend_rating"; then
+            success_count=$((success_count + 1))
+          fi
+        fi
+      done <<< "$selected_items"
+
+      if [[ $success_count -gt 0 ]]; then
+        gum style --foreground 2 "✓ Added $success_count games with shared rank $rating"
+      else
+        gum style --foreground 1 "No games were successfully added to the collection"
+      fi
+      ;;    "🔍 Manual query")
+      if ! process_manual_query "$original_query" "$system" "$collection" "$rating" "$prepend_rating"; then
+        log_verbose "Manual query processing failed, but continuing..."
+      fi
+      ;;
+
+    "⏭️ Skip without marker")
+      gum style --foreground 8 "Skipped: $query (no marker created)"
+      ;;
+
+    "📝 Skip with marker")
+      gum style --foreground 3 "Skipped: $query (with marker)"
+      create_skip_marker "$system" "$collection" "$original_query" "$rating"
+      ;;
+
+    "")
+      gum style --foreground 8 "No selection made, skipping: $query"
+      ;;
+
+    *)
+      # Regular single selection (excluding the first special option)
+      local selected_index=-1
+      for i in "${!all_options[@]}"; do
+        if [[ $i -eq 0 ]]; then
+          continue  # Skip the special first option
+        fi
+        if [[ "${all_options[$i]}" == "$choice" ]]; then
+          selected_index=$((i - 1))
+          break
+        fi
+      done
+
+      if [[ $selected_index -ge 0 && $selected_index -lt ${#all_file_paths[@]} ]]; then
+        if copy_file "${all_file_paths[$selected_index]}" "$system" "$collection" "$rating" "$prepend_rating"; then
+          gum style --foreground 2 "✓ Added single game with rank $rating: ${choice#*] }"
+        else
+          log_verbose "Copy file failed, but continuing..."
+        fi
+      else
+        gum style --foreground 1 "Error: Invalid selection"
+      fi
+      ;;
+  esac
+
+  return 0
+}
+
+# Function to process a single query
+#######################################
+# Process a single query from the list.
+# Searches for matches and prompts user for selection.
+# Arguments:
+#   Query string
+#   System name
+#   Collection name
+#   Original query (optional)
+#   Rating (optional)
+#   Prepend rating flag (optional)
+# Returns:
+#   0 on success, 1 on failure
+#######################################
+process_query() {
+  local query="$1"
+  local system="$2"
+  local collection="$3"
+  local original_query="${4:-$query}"
+  local rating="${5:-}"
+  local prepend_rating="${6:-true}"
+
+  gum style --foreground 3 --bold "Processing: $query"
+
+  # Check if this is a shared title query
+  if detect_shared_titles "$query"; then
+    gum style --foreground 6 "Detected shared title format: $query"
+    if process_shared_title_query "$query" "$system" "$collection" "$original_query" "$rating" "$prepend_rating"; then
+      return 0
+    else
+      gum style --foreground 3 "Falling back to standard processing for: $query"
+    fi
+  fi
+
+  # Collect matches into arrays
+  local options=()
+  local file_paths=()
+
+  while IFS='|' read -r display_name file_path; do
+    if [[ -n "$display_name" && -n "$file_path" ]]; then
+      options+=("$display_name")
+      file_paths+=("$file_path")
+    fi
+  done < <(gather_matches "$query" "$system")
+
+  if [[ ${#options[@]} -eq 0 ]]; then
+    gum style --foreground 1 "No matches found for: $query"
+    if ! process_manual_query "$original_query" "$system" "$collection" "$rating" "$prepend_rating"; then
+      log_verbose "Manual query processing failed, but continuing..."
+    fi
+    return 0
+  fi
+
+  # Auto-pick if there's only one match
+  if [[ ${#options[@]} -eq 1 ]]; then
+    gum style --foreground 2 "✓ Auto-selected only match: ${options[0]}"
+    if ! copy_file "${file_paths[0]}" "$system" "$collection" "$rating" "$prepend_rating"; then
+      log_verbose "Copy file failed, but continuing..."
+    fi
+    return 0
+  fi
+
+  # Check for shared titles (e.g., "Super Mario 64" vs "Super Mario 64 & Zelda Ocarina of Time")
+  if detect_shared_titles "$query"; then
+    process_shared_title_query "$query" "$system" "$collection" "$rating" "$prepend_rating"
+    return 0
+  fi
+
+  # Add control options
+  options+=("🔍 Manual query")
+  options+=("⏭️ Skip without marker")
+  options+=("📝 Skip with marker")
+
+  local choice
+  # Temporarily disable exit on error for gum choose
+  set +e
+  choice=$(gum choose --header "Select file for: $query" "${options[@]}")
+  local gum_exit_code=$?
+  set -e
+
+  # Handle cancellation (user pressed escape or similar)
+  if [[ $gum_exit_code -ne 0 ]]; then
+    gum style --foreground 8 "Selection cancelled, skipping: $query"
+    return 0
+  fi
+
+  case "$choice" in
+  "🔍 Manual query")
+    if ! process_manual_query "$original_query" "$system" "$collection" "$rating" "$prepend_rating"; then
+      log_verbose "Manual query processing failed, but continuing..."
+    fi
+    ;;
+  "⏭️ Skip without marker")
+    gum style --foreground 8 "Skipped: $query (no marker created)"
+    ;;
+  "📝 Skip with marker")
+    gum style --foreground 3 "Skipped: $query (with marker)"
+    create_skip_marker "$system" "$collection" "$original_query" "$rating"
+    ;;
+  "")
+    gum style --foreground 8 "No selection made, skipping: $query"
+    ;;
+  *)
+    # Find the selected file path
+    local selected_index=-1
+    for i in "${!options[@]}"; do
+      if [[ "${options[$i]}" == "$choice" ]]; then
+        selected_index=$i
+        break
+      fi
+    done
+
+    if [[ $selected_index -ge 0 && $selected_index -lt ${#file_paths[@]} ]]; then
+      if ! copy_file "${file_paths[$selected_index]}" "$system" "$collection" "$rating" "$prepend_rating"; then
+        log_verbose "Copy file failed, but continuing..."
+      fi
+    else
+      gum style --foreground 1 "Error: Invalid selection"
+    fi
+    ;;
+  esac
+}
+
+#######################################
+# Find all .skipped marker files in a collection directory.
+# Globals:
+#   COLLECTIONS_DIR
+# Arguments:
+#   System name
+#   Collection name
+# Outputs:
+#   List of skipped filenames to STDOUT
+#######################################
+find_skipped_files() {
+  local system="$1"
+  local collection="$2"
+  local skip_dir="$COLLECTIONS_DIR/$system/$collection"
+
+  # Check if directory exists
+  if [[ ! -d "$skip_dir" ]]; then
+    return 0
+  fi
+
+  # Find all .skipped files in the directory
+  local skipped_files=()
+  while IFS= read -r -d '' file; do
+    if [[ "$file" == *.skipped ]]; then
+      skipped_files+=("$(basename "$file")")
+    fi
+  done < <(find "$skip_dir" -maxdepth 1 -name "*.skipped" -type f -print0 2>/dev/null)
+
+  # Return the list of skipped files
+  printf '%s\n' "${skipped_files[@]}"
+}
+
+#######################################
+# Extract original query from skipped filename.
+# Removes .skipped extension and rating prefix if present.
+# Arguments:
+#   Skipped filename
+# Outputs:
+#   Original query string to STDOUT
+#######################################
+extract_query_from_skipped_file() {
+  local skipped_file="$1"
+  local query
+
+  # Remove .skipped extension
+  query="${skipped_file%.skipped}"
+
+  # If it starts with a rating (digits and dash), remove it
+  if [[ "$query" =~ ^[0-9]+-(.*)$ ]]; then
+    query="${BASH_REMATCH[1]}"
+  fi
+
+  echo "$query"
+}
+
+# Function to create a skip marker file
+#######################################
+# Create a skip marker file for a query.
+# Globals:
+#   COLLECTIONS_DIR
+# Arguments:
+#   System name
+#   Collection name
+#   Query string
+#   Rating (optional)
+# Returns:
+#   0 on success, 1 on failure
+#######################################
+create_skip_marker() {
+  local system="$1"
+  local collection="$2"
+  local query="$3"
+  local rating="${4:-}"
+
+  local dest_dir="$COLLECTIONS_DIR/$system/$collection"
+
+  # Create collections directory if it doesn't exist
+  if ! mkdir -p "$dest_dir"; then
+    gum style --foreground 1 "✗ Failed to create directory: $dest_dir"
+    return 1
+  fi
+
+  # Generate skipped filename
+  local skip_filename
+  if [[ -n "$rating" ]]; then
+    skip_filename="${rating}-${query}.skipped"
+  else
+    skip_filename="${query}.skipped"
+  fi
+
+  # Clean filename (remove problematic characters)
+  skip_filename=$(echo "$skip_filename" | tr -d '/:*?"<>|')
+
+  # Create empty skipped file
+  if touch "$dest_dir/$skip_filename"; then
+    gum style --foreground 3 "⏭️ Created skip marker: $skip_filename"
+    return 0
+  else
+    gum style --foreground 1 "✗ Failed to create skip marker"
+    return 1
+  fi
+}
+
+#######################################
+# Main program entry point.
+# Interactive ROM collection organizer that prompts for system,
+# list file, and processes each query.
+# Globals:
+#   OFFICIAL_DIR
+#   TRANSLATIONS_DIR
+#   LISTS_DIR
+#   COLLECTIONS_DIR
+#   BASE_DIR
+# Arguments:
+#   None
+#######################################
+main() {
+  gum style --foreground 5 --bold --align center "ROM Collection Organizer"
+
+  # Check if directories exist
+  for dir in "$OFFICIAL_DIR" "$TRANSLATIONS_DIR" "$LISTS_DIR"; do
+    if [[ ! -d "$dir" ]]; then
+      gum style --foreground 1 "Error: Directory $dir does not exist"
+      exit 1
+    fi
+  done
+
+  # Create collections directory if it doesn't exist
+  mkdir -p "$COLLECTIONS_DIR"
+
+  # Select text file from Lists folder
+  local list_files=()
+  while IFS= read -r -d '' file; do
+    list_files+=("$(basename "$file")")
+  done < <(find "$LISTS_DIR" -name "*.txt" -type f -print0 2>/dev/null)
+
+  if [[ ${#list_files[@]} -eq 0 ]]; then
+    gum style --foreground 1 "No text files found in $LISTS_DIR"
+    exit 1
+  fi
+
+  local selected_list
+  # Temporarily disable exit on error for gum choose
+  set +e
+  selected_list=$(gum choose --header "Select query list:" "${list_files[@]}")
+  local gum_exit_code=$?
+  set -e
+
+  if [[ $gum_exit_code -ne 0 || -z "$selected_list" ]]; then
+    gum style --foreground 8 "No list selected, exiting"
+    exit 0
+  fi
+
+  local list_file="$LISTS_DIR/$selected_list"
+  local collection_name="${selected_list%.*}"
+
+  # Get available systems
+  local systems=()
+  while IFS= read -r -d '' dir; do
+    local basename
+    basename=$(basename "$dir")
+    if [[ "$basename" != "Official" ]]; then
+      systems+=("$basename")
+    fi
+  done < <(find "$OFFICIAL_DIR" -maxdepth 1 -type d -print0 2>/dev/null)
+
+  if [[ ${#systems[@]} -eq 0 ]]; then
+    gum style --foreground 1 "No system folders found in $OFFICIAL_DIR"
+    exit 1
+  fi
+
+  # Sort systems with preferred Nintendo order at the top
+  local priority_systems=()
+  local other_systems=()
+
+  # Define priority order for Nintendo systems
+  local priority_order=(
+    "Nintendo - Super Nintendo Entertainment System"
+    "Nintendo - Nintendo Entertainment System (Headerless)"
+    "Nintendo - Nintendo Entertainment System (Headered)"
+    "Nintendo - Nintendo 64 (BigEndian)"
+    "Nintendo - Nintendo 64 (ByteSwapped)"
+    "Nintendo - Game Boy"
+    "Nintendo - Game Boy Color"
+    "Nintendo - Game Boy Advance"
+  )
+
+  # First, add priority systems in order if they exist
+  for priority_system in "${priority_order[@]}"; do
+    for system in "${systems[@]}"; do
+      if [[ "$system" == "$priority_system" ]]; then
+        priority_systems+=("$system")
+        break
+      fi
+    done
+  done
+
+  # Then add any other Nintendo systems not in priority list
+  local other_nintendo_systems=()
+  for system in "${systems[@]}"; do
+    if [[ "$system" == Nintendo* ]]; then
+      # Check if this system is already in priority list
+      local is_priority=false
+      for priority_system in "${priority_systems[@]}"; do
+        if [[ "$system" == "$priority_system" ]]; then
+          is_priority=true
+          break
+        fi
+      done
+      if [[ "$is_priority" == false ]]; then
+        other_nintendo_systems+=("$system")
+      fi
+    else
+      other_systems+=("$system")
+    fi
+  done
+
+  # Sort remaining Nintendo systems and other systems alphabetically
+  readarray -t other_nintendo_systems < <(printf '%s\n' "${other_nintendo_systems[@]}" | sort)
+  readarray -t other_systems < <(printf '%s\n' "${other_systems[@]}" | sort)
+
+  # Combine: priority systems first, then other Nintendo systems, then everything else
+  systems=("${priority_systems[@]}" "${other_nintendo_systems[@]}" "${other_systems[@]}")
+
+  local selected_system
+  # Temporarily disable exit on error for gum choose
+  set +e
+  selected_system=$(gum choose --header "Select system:" "${systems[@]}")
+  local gum_exit_code=$?
+  set -e
+
+  if [[ $gum_exit_code -ne 0 || -z "$selected_system" ]]; then
+    gum style --foreground 8 "No system selected, exiting"
+    exit 0
+  fi
+
+  gum style --foreground 2 "Processing collection: $collection_name for system: $selected_system"
+
+  # Check if there are skipped files from previous runs
+  local skipped_files=()
+  mapfile -t skipped_files < <(find_skipped_files "$selected_system" "$collection_name")
+  local skipped_files_count=${#skipped_files[@]}
+
+  # If there are skipped files, ask user if they want to retry them
+  local retry_skipped=false
+  local retry_queries=()
+  if [[ $skipped_files_count -gt 0 ]]; then
+    gum style --foreground 6 "Found $skipped_files_count previously skipped queries in this collection"
+
+    set +e
+    if gum confirm "Would you like to retry these skipped queries?"; then
+      retry_skipped=true
+
+      # Extract original queries from skipped files
+      for skipped_file in "${skipped_files[@]}"; do
+        local original_query
+        original_query=$(extract_query_from_skipped_file "$skipped_file")
+        retry_queries+=("$original_query")
+
+        # Remove the skipped marker file since we're retrying it
+        local skip_file_path="$COLLECTIONS_DIR/$selected_system/$collection_name/$skipped_file"
+        if [[ -f "$skip_file_path" ]]; then
+          rm -f "$skip_file_path"
+        fi
+      done
+
+      gum style --foreground 2 "✓ Will retry $skipped_files_count previously skipped queries"
+    else
+      gum style --foreground 8 "Skipping previously skipped queries"
+    fi
+    set -e
+  fi
+
+  # Count total queries in the file first
+  local total_queries=0
+  while IFS= read -r query <&4; do
+    # Skip empty lines and comments
+    [[ -z "$query" || "$query" =~ ^[[:space:]]*# ]] && continue
+
+    # Trim whitespace safely
+    query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$query" ]] && continue
+
+    total_queries=$((total_queries + 1))
+  done 4<"$list_file"
+
+  # The actual total for display purposes should be the total from the file only
+  local display_total=$total_queries
+
+  log_verbose "Found $total_queries queries in file"
+
+  # Calculate the number of digits needed for rating
+  local rating_digits=${#total_queries}
+  if [[ $rating_digits -lt 2 ]]; then
+    rating_digits=2  # Minimum 2 digits
+  fi
+
+  # Ask if user wants to prepend ratings
+  local prepend_rating="true"
+  gum style --foreground 6 "Prepend rating numbers to filenames?"
+  gum style --foreground 8 "This will add padded numbers (e.g., 01-, 02-) to organize files by query order."
+
+  set +e
+  if gum confirm --default=true "Prepend rating?"; then
+    prepend_rating="true"
+    gum style --foreground 2 "✓ Ratings will be prepended with $rating_digits digits"
+  else
+    prepend_rating="false"
+    gum style --foreground 8 "✓ No ratings will be prepended"
+  fi
+  set -e
+
+  # Process each query from the file
+  local line_number=0
+  local processed_count=0
+  local skipped_count=0
+  local retried_count=0
+  log_verbose "Starting to process queries from file: $list_file"
+
+  # First, process any retried queries if requested
+  if [[ "$retry_skipped" == true && ${#retry_queries[@]} -gt 0 ]]; then
+    gum style --foreground 6 "Processing previously skipped queries"
+
+    for query in "${retry_queries[@]}"; do
+      retried_count=$((retried_count + 1))
+      log_verbose "Processing retried query $retried_count: $query"
+
+      # Generate rating with proper padding
+      local rating=""
+      if [[ "$prepend_rating" == "true" ]]; then
+        # When retrying skipped queries, we use their original rating
+        # from the list, which will be handled when processing the main list
+        rating=""
+      fi
+
+      gum style --foreground 4 "Retry query (previously skipped): $query"
+
+      # Process the query and continue regardless of result
+      if ! process_query "$query" "$selected_system" "$collection_name" "$query" "$rating" "false"; then
+        log_verbose "Query processing returned non-zero exit code, but continuing..."
+      fi
+
+      log_verbose "Finished processing retried query: $query"
+    done
+
+    gum style --foreground 6 "Finished processing retried queries"
+  fi
+
+  # Use file descriptor 3 to avoid stdin conflicts with interactive commands
+  while IFS= read -r query <&3; do
+    line_number=$((line_number + 1))
+    log_verbose "Read line $line_number: '$query'"
+
+    # Skip empty lines and comments
+    [[ -z "$query" || "$query" =~ ^[[:space:]]*# ]] && continue
+
+    # Trim whitespace safely
+    query=$(echo "$query" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$query" ]] && continue
+
+    # Validate query (basic sanity check)
+    if [[ ${#query} -gt 200 ]]; then
+      gum style --foreground 1 "Warning: Query on line $line_number is very long, skipping"
+      continue
+    fi
+
+    processed_count=$((processed_count + 1))
+    log_verbose "Processing query $processed_count: $query"
+
+    # Generate rating with proper padding
+    local rating=""
+    if [[ "$prepend_rating" == "true" ]]; then
+      rating=$(printf "%0${rating_digits}d" $processed_count)
+    fi
+
+    gum style --foreground 4 "Query $processed_count of $display_total: $query"
+    if [[ "$prepend_rating" == "true" ]]; then
+      gum style --foreground 8 "  Rating: $rating"
+    fi
+
+    # Check if ROM with this rank already exists (only when rating is enabled)
+    if [[ "$prepend_rating" == "true" && -n "$rating" ]]; then
+      if check_rank_exists "$selected_system" "$collection_name" "$rating"; then
+        gum style --foreground 3 "⏭️ Skipping query $processed_count: ROM with rank $rating already exists"
+        log_verbose "Skipped query $processed_count because rank $rating already exists in destination"
+        skipped_count=$((skipped_count + 1))
+        continue
+      fi
+    fi
+
+    # Process the query and continue regardless of result
+    if ! process_query "$query" "$selected_system" "$collection_name" "$query" "$rating" "$prepend_rating"; then
+      log_verbose "Query processing returned non-zero exit code, but continuing..."
+    fi
+
+    log_verbose "Finished processing query $processed_count: $query"
+
+  done 3<"$list_file"
+
+  log_verbose "Finished reading all lines from file"
+
+  gum style --foreground 2 "Processed $processed_count queries from $collection_name"
+  if [[ $skipped_count -gt 0 ]]; then
+    gum style --foreground 3 "Skipped $skipped_count queries (ROMs already exist with those ranks)"
+  fi
+
+  # Report on retried queries if applicable
+  if [[ "$retry_skipped" == true && $retried_count -gt 0 ]]; then
+    gum style --foreground 6 "Additionally processed $retried_count previously skipped queries"
+  fi
+
+  gum style --foreground 2 --bold "✓ Collection processing complete!"
+}
+
+# Run main function
+main "$@"
