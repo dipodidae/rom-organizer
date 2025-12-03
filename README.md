@@ -87,11 +87,14 @@ The script expects this directory structure:
 
 ```
 ROMBase/
-├── Official/              # Original ROMs organized by system
+├── Official/              # Original ROMs organized by system (priority: 100)
 │   ├── Nintendo - SNES/
 │   ├── Nintendo - NES/
 │   └── [other systems]/
-├── Translations/          # Translated ROMs (optional)
+├── Translations/          # Translated ROMs (priority: 200, preferred)
+│   └── [systems]/
+├── Hacks/                 # ROM hacks (optional, configurable)
+│   └── [systems]/
 ├── Lists/                 # Query files (*.txt)
 │   ├── Best Games.txt
 │   └── Top 100.txt
@@ -99,6 +102,8 @@ ROMBase/
     └── [system]/
         └── [collection name]/
 ```
+
+**Note**: Sources are configurable! See [Configuration](#-configuration) for details on adding custom sources like Hacks, Homebrew, etc.
 
 ### Query List Format
 
@@ -173,15 +178,75 @@ The system uses multiple layers of error handling:
 Located in `config/defaults.conf`:
 
 ```bash
-auto_select_single=true          # Auto-select when only one match
-prepend_rating_default=true      # Add rating prefix to filenames
-fuzzy_threshold=15.0             # Search sensitivity (0-100)
-max_results=100                  # Maximum search results
-enable_dry_run=false             # Dry run by default
-enable_resume=true               # Enable session resume
-cleanup_sessions_days=7          # Days to keep session files
-create_skip_markers=true         # Create .skipped files
+# Directory Configuration
+base_dir=/mnt/drive/Roms          # Base directory for all ROMs
+
+# ROM Source Configuration (NEW in v2.0!)
+# Format: sources=name:path:priority
+# - name: Display name for the source
+# - path: Directory path (relative to base_dir or absolute)
+# - priority: Search priority (higher number = preferred in results)
+#
+# Sources are searched in order, with higher priority preferred in results
+sources=Official:Official:100
+sources=Translations:Translations:200
+# sources=Hacks:Hacks:150          # Add custom sources!
+# sources=Homebrew:Homebrew:120
+
+# Other Directories
+lists_dir=Lists                   # Query list files
+collections_dir=Collections        # Output directory
+
+# Search Settings
+auto_select_single=true           # Auto-select when only one match
+prepend_rating_default=true       # Add rating prefix to filenames
+fuzzy_threshold=15.0              # Search sensitivity (0-100)
+max_results=100                   # Maximum search results
+
+# Session Settings
+enable_dry_run=false              # Dry run by default
+enable_resume=true                # Enable session resume
+cleanup_sessions_days=7           # Days to keep session files
+create_skip_markers=true          # Create .skipped files
 ```
+
+### Adding Custom ROM Sources
+
+You can add any number of custom ROM sources. The script will:
+1. **Search all sources** for matching ROMs
+2. **Sort results by priority** (higher number = preferred)
+3. **Use the first source** for system directory enumeration
+
+Example configurations:
+
+#### Add ROM Hacks
+
+```bash
+sources=Official:Official:100
+sources=Hacks:Hacks:150
+sources=Translations:Translations:200
+```
+
+#### Add Homebrew
+
+```bash
+sources=Official:Official:100
+sources=Homebrew:Homebrew:120
+sources=Translations:Translations:200
+```
+
+#### Use Absolute Paths
+
+```bash
+sources=Official:/media/roms/official:100
+sources=Translations:/media/roms/translations:200
+sources=External:/mnt/external/roms:150
+```
+
+**Priority Guidelines:**
+- `100-149`: Original/Official ROMs
+- `150-199`: Modifications (Hacks, Homebrew)
+- `200+`: Translations (typically preferred)
 
 ### User Configuration
 
@@ -191,6 +256,11 @@ Create `~/.config/rom-organizer/config.conf` to override defaults:
 # My custom settings
 fuzzy_threshold=10.0
 max_results=50
+
+# Add my custom sources
+sources=Official:Official:100
+sources=MyHacks:Hacks:180
+sources=Translations:Translations:200
 ```
 
 ## 📊 Session Management

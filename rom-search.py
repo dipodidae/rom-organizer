@@ -66,7 +66,8 @@ class RomMatch:
     """Represents a ROM file match with metadata."""
     filename: str
     full_path: str
-    source_type: str  # "official" or "translation"
+    source_type: str  # Dynamic source name (e.g., "Official", "Translations", "Hacks")
+    source_priority: int  # Source priority (higher = preferred in results)
     score: float
     size: int
     modified_time: float
@@ -86,6 +87,7 @@ class RomSearchEngine:
     def __init__(
         self,
         base_dir: str,
+        sources: Optional[List[Dict[str, any]]] = None,
         cache_dir: Optional[str] = None,
         fuzzy_threshold: float = DEFAULT_FUZZY_THRESHOLD,
         max_workers: Optional[int] = None
@@ -94,13 +96,24 @@ class RomSearchEngine:
 
         Args:
             base_dir: Base directory containing ROM collections
+            sources: List of source configs [{name, path, priority}, ...] or None for legacy mode
             cache_dir: Directory for caching search indexes
             fuzzy_threshold: Minimum fuzzy match score (0-100)
             max_workers: Maximum worker threads (default: 8)
         """
         self.base_dir = Path(base_dir).resolve()
-        self.official_dir = self.base_dir / "Official"
-        self.translations_dir = self.base_dir / "Translations"
+
+        # Configure sources (dynamic or legacy)
+        if sources:
+            self.sources = sources
+            logger.info(f"Initialized with {len(sources)} dynamic source(s)")
+        else:
+            # Legacy mode: fallback to hardcoded Official/Translations
+            self.sources = [
+                {'name': 'Official', 'path': 'Official', 'priority': 100},
+                {'name': 'Translations', 'path': 'Translations', 'priority': 200}
+            ]
+            logger.warning("Using legacy hardcoded sources (Official/Translations)")
 
         # Performance settings
         self.max_workers = max_workers or DEFAULT_MAX_WORKERS
@@ -126,6 +139,21 @@ class RomSearchEngine:
             Path to the cache file for the system
         """
         return self.cache_dir / f"{system}.json"
+
+    def _resolve_source_path(self, path: str) -> Path:
+        """Resolve source path (handles both absolute and relative paths).
+
+        Args:
+            path: Source path (absolute or relative to base_dir)
+
+        Returns:
+            Resolved Path object
+        """
+        source_path = Path(path)
+        if source_path.is_absolute():
+            return source_path
+        else:
+            return self.base_dir / path
 
     def _calculate_dir_hash(self, directory: Path) -> str:
         """Calculate hash of directory contents for cache validation."""
@@ -167,17 +195,21 @@ class RomSearchEngine:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
 
-            # Validate cache version and directory hash
+            # Validate cache version
             if cache_data.get('version') != CACHE_VERSION:
                 return False
 
-            # Check if directories have changed
-            official_hash = self._calculate_dir_hash(self.official_dir / system)
-            trans_hash = self._calculate_dir_hash(self.translations_dir / system)
+            # Check if directories have changed using dynamic sources
+            source_hashes = cache_data.get('source_hashes', {})
+            for source in self.sources:
+                source_name = source['name']
+                source_path = self._resolve_source_path(source['path'])
+                current_hash = self._calculate_dir_hash(source_path / system)
+                cached_hash = source_hashes.get(source_name, '')
 
-            if (cache_data.get('official_hash') != official_hash or
-                cache_data.get('translations_hash') != trans_hash):
-                return False
+                if current_hash != cached_hash:
+                    logger.debug(f"Cache invalid: {source_name} hash mismatch")
+                    return False
 
             # Load cached matches
             matches = {}
@@ -187,6 +219,7 @@ class RomSearchEngine:
                         filename=match['filename'],
                         full_path=match['full_path'],
                         source_type=match['source_type'],
+                        source_priority=match.get('source_priority', 100),
                         score=match['score'],
                         size=match['size'],
                         modified_time=match['modified_time']
@@ -211,17 +244,23 @@ class RomSearchEngine:
             with self._index_lock:
                 matches = self._file_index.get(system, {})
 
+            # Calculate hashes for all sources
+            source_hashes = {}
+            for source in self.sources:
+                source_path = self._resolve_source_path(source['path'])
+                source_hashes[source['name']] = self._calculate_dir_hash(source_path / system)
+
             cache_data = {
                 'version': CACHE_VERSION,
                 'timestamp': time.time(),
-                'official_hash': self._calculate_dir_hash(self.official_dir / system),
-                'translations_hash': self._calculate_dir_hash(self.translations_dir / system),
+                'source_hashes': source_hashes,
                 'matches': {
                     source_type: [
                         {
                             'filename': m.filename,
                             'full_path': m.full_path,
                             'source_type': m.source_type,
+                            'source_priority': m.source_priority,
                             'size': m.size,
                             'modified_time': m.modified_time
                         }
@@ -253,8 +292,17 @@ class RomSearchEngine:
         ext = filename.lower().split('.')[-1]
         return ext in self.ROM_EXTENSIONS
 
-    def _scan_directory(self, directory: Path, source_type: str) -> List[RomMatch]:
-        """Scan directory for ROM files."""
+    def _scan_directory(self, directory: Path, source_type: str, source_priority: int) -> List[RomMatch]:
+        """Scan directory for ROM files.
+
+        Args:
+            directory: Directory to scan
+            source_type: Name of the source
+            source_priority: Priority value for this source
+
+        Returns:
+            List of RomMatch objects
+        """
         if not directory.exists():
             return []
 
@@ -272,6 +320,7 @@ class RomSearchEngine:
                     filename=file_path.name,
                     full_path=str(file_path),
                     source_type=source_type,
+                    source_priority=source_priority,
                     score=100.0,
                     size=stat.st_size,
                     modified_time=stat.st_mtime
@@ -284,7 +333,7 @@ class RomSearchEngine:
     def _build_index(self, system: str) -> Dict[str, List[RomMatch]]:
         """Build file index for a system.
 
-        Scans both official and translation directories for the specified system.
+        Scans all configured source directories for the specified system.
 
         Args:
             system: Name of the gaming system
@@ -297,17 +346,22 @@ class RomSearchEngine:
 
         matches = {}
 
-        # Scan official directory
-        official_dir = self.official_dir / system
-        if official_dir.exists():
-            matches['official'] = self._scan_directory(official_dir, 'official')
-            logger.info(f"Found {len(matches['official'])} official ROMs")
+        # Scan each configured source
+        for source in self.sources:
+            source_name = source['name']
+            source_path = self._resolve_source_path(source['path'])
+            source_priority = source['priority']
 
-        # Scan translations directory
-        trans_dir = self.translations_dir / system
-        if trans_dir.exists():
-            matches['translations'] = self._scan_directory(trans_dir, 'translations')
-            logger.info(f"Found {len(matches['translations'])} translation ROMs")
+            source_system_dir = source_path / system
+            if source_system_dir.exists():
+                matches[source_name] = self._scan_directory(
+                    source_system_dir,
+                    source_name,
+                    source_priority
+                )
+                logger.info(f"Found {len(matches[source_name])} ROMs in {source_name}")
+            else:
+                logger.debug(f"Source {source_name} does not have {system} directory")
 
         elapsed = time.time() - start_time
         total_files = sum(len(files) for files in matches.values())
@@ -427,17 +481,18 @@ class RomSearchEngine:
                         filename=rom_match.filename,
                         full_path=rom_match.full_path,
                         source_type=rom_match.source_type,
+                        source_priority=rom_match.source_priority,
                         score=score,
                         size=rom_match.size,
                         modified_time=rom_match.modified_time
                     ))
 
-        # Sort: prioritize translations and higher scores
+        # Sort by priority (higher priority first), then score, then size
         results.sort(
             key=lambda x: (
-                x.score + (10.0 if x.source_type == 'translations' else 0.0),
-                x.source_type == 'translations',
-                -x.size
+                x.source_priority,  # Higher priority sources first
+                x.score,            # Higher match scores first
+                -x.size             # Larger files first (negative for descending)
             ),
             reverse=True
         )
@@ -450,24 +505,20 @@ class RomSearchEngine:
     def get_systems(self) -> List[str]:
         """Get list of available gaming systems.
 
-        Scans both official and translation directories.
+        Scans all configured source directories.
 
         Returns:
             Sorted list of system names
         """
         systems = set()
 
-        # Scan official directory
-        if self.official_dir.exists():
-            for item in self.official_dir.iterdir():
-                if item.is_dir():
-                    systems.add(item.name)
-
-        # Scan translations directory
-        if self.translations_dir.exists():
-            for item in self.translations_dir.iterdir():
-                if item.is_dir():
-                    systems.add(item.name)
+        # Scan all source directories
+        for source in self.sources:
+            source_path = self._resolve_source_path(source['path'])
+            if source_path.exists():
+                for item in source_path.iterdir():
+                    if item.is_dir():
+                        systems.add(item.name)
 
         return sorted(systems)
 
@@ -550,15 +601,27 @@ def main() -> None:
     parser.add_argument("--stats", action="store_true", help="Show search engine statistics")
     parser.add_argument("--list-systems", action="store_true", help="List available systems")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--sources", help="JSON string with source configuration (optional)")
 
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Parse sources configuration if provided
+    sources = None
+    if args.sources:
+        try:
+            sources = json.loads(args.sources)
+            logger.debug(f"Loaded {len(sources)} source(s) from command line")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse sources JSON: {e}")
+            sys.exit(1)
+
     # Initialize search engine
     search_engine = RomSearchEngine(
         base_dir=args.base_dir,
+        sources=sources,
         cache_dir=args.cache_dir,
         fuzzy_threshold=args.fuzzy_threshold
     )

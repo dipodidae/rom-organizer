@@ -1,0 +1,90 @@
+name: Automated Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip unzip p7zip-full
+          
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install rapidfuzz
+      
+      - name: Install gum (TUI library)
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update && sudo apt-get install -y gum
+      
+      - name: Setup test environment
+        run: |
+          mkdir -p test_roms/Official/TestSystem
+          mkdir -p test_roms/Translations/TestSystem
+          mkdir -p test_roms/Hacks/TestSystem
+          mkdir -p test_roms/Lists
+          mkdir -p test_roms/Collections
+          
+          # Create test ROM files
+          echo "test rom 1" > "test_roms/Official/TestSystem/Test Game 1.zip"
+          echo "test rom 2" > "test_roms/Official/TestSystem/Test Game 2.zip"
+          echo "test rom translation" > "test_roms/Translations/TestSystem/Test Game 1 (English).zip"
+          echo "test rom hack" > "test_roms/Hacks/TestSystem/Test Game 1 (Hack).zip"
+          
+          # Create test list
+          echo "Test Game 1" > test_roms/Lists/test.txt
+          echo "Test Game 2" >> test_roms/Lists/test.txt
+      
+      - name: Run basic tests
+        run: |
+          cd tests
+          bash test_basic.sh
+      
+      - name: Run source configuration tests
+        run: |
+          cd tests
+          bash test_sources.sh
+      
+      - name: Run Python search engine tests
+        run: |
+          cd tests
+          bash test_search_engine.sh
+      
+      - name: Test configuration parsing
+        run: |
+          SCRIPT_DIR=$(pwd)
+          export SCRIPT_DIR
+          source lib/rom_constants.sh
+          source lib/rom_utils.sh
+          source lib/rom_config.sh
+          
+          init_config
+          parse_sources
+          
+          # Verify sources loaded
+          count=$(get_source_count)
+          if [ "$count" -lt 1 ]; then
+            echo "ERROR: No sources loaded"
+            exit 1
+          fi
+          echo "✓ Sources loaded: $count"
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf test_roms

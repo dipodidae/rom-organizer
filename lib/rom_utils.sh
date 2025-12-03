@@ -256,10 +256,29 @@ validate_system() {
     return 1
   fi
 
-  # Check if system directory exists in Official
-  if [[ ! -d "$base_dir/Official/$system" ]]; then
-    log_verbose "System validation failed: directory not found: $base_dir/Official/$system"
-    return 1
+  # Check if system directory exists in primary source
+  local primary_source
+  primary_source=$(get_primary_source)
+
+  if [[ -z "$primary_source" ]]; then
+    # Fallback to legacy Official directory if sources not loaded
+    if [[ ! -d "$base_dir/Official/$system" ]]; then
+      log_verbose "System validation failed: directory not found: $base_dir/Official/$system"
+      return 1
+    fi
+  else
+    # Build primary source path
+    local primary_source_dir
+    if [[ "$primary_source" = /* ]]; then
+      primary_source_dir="$primary_source"
+    else
+      primary_source_dir="$base_dir/$primary_source"
+    fi
+
+    if [[ ! -d "$primary_source_dir/$system" ]]; then
+      log_verbose "System validation failed: directory not found: $primary_source_dir/$system"
+      return 1
+    fi
   fi
 
   return 0

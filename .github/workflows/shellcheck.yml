@@ -1,0 +1,44 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: warning
+          ignore_paths: |
+            rom_env
+            backup
+        env:
+          SHELLCHECK_OPTS: -e SC2034 -e SC1091
+      
+      - name: ShellCheck - Main Script
+        run: shellcheck -x rom-organizer.sh
+        
+      - name: ShellCheck - Library Files
+        run: |
+          for file in lib/*.sh; do
+            echo "Checking $file..."
+            shellcheck -x "$file"
+          done
+      
+      - name: ShellCheck - Test Files
+        run: |
+          for file in tests/*.sh; do
+            echo "Checking $file..."
+            shellcheck -x "$file"
+          done

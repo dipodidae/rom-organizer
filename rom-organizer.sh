@@ -125,26 +125,55 @@ setup_directories() {
     log_verbose "Auto-detected base directory: $BASE_DIR"
   fi
 
+  # Parse ROM sources
+  if ! parse_sources; then
+    ui_error "Failed to parse ROM source configuration"
+    exit "$EXIT_INVALID_CONFIG"
+  fi
+
+  # Build full paths for each source and validate
+  declare -ga SOURCE_FULL_PATHS=()
+  local source_count
+  source_count=$(get_source_count)
+
+  log_info "Setting up $source_count ROM source(s)"
+
+  for i in $(seq 0 $((source_count - 1))); do
+    local source_name source_path source_priority source_full_path
+    source_name=$(get_source_name "$i")
+    source_path=$(get_source_path "$i")
+    source_priority=$(get_source_priority "$i")
+
+    # Support both relative and absolute paths
+    if [[ "$source_path" = /* ]]; then
+      source_full_path="$source_path"
+    else
+      source_full_path="$BASE_DIR/$source_path"
+    fi
+
+    SOURCE_FULL_PATHS+=("$source_full_path")
+
+    # Validate directory exists
+    if [[ ! -d "$source_full_path" ]]; then
+      ui_error "ROM source directory not found: $source_full_path (${source_name})"
+      exit "$EXIT_INVALID_CONFIG"
+    fi
+
+    log_verbose "Source $i: $source_name @ $source_full_path (priority: $source_priority)"
+  done
+
+  # Set legacy variables for backward compatibility (use first two sources)
+  # shellcheck disable=SC2034  # OFFICIAL_DIR/TRANSLATIONS_DIR may be used by other scripts
+  OFFICIAL_DIR="${SOURCE_FULL_PATHS[0]:-}"
+  # shellcheck disable=SC2034
+  TRANSLATIONS_DIR="${SOURCE_FULL_PATHS[1]:-}"
+
   # Get directory names from config or use defaults
-  local official_subdir translations_subdir lists_subdir collections_subdir
-  official_subdir="$(get_config "official_dir" "Official")"
-  translations_subdir="$(get_config "translations_dir" "Translations")"
+  local lists_subdir collections_subdir
   lists_subdir="$(get_config "lists_dir" "Lists")"
   collections_subdir="$(get_config "collections_dir" "Collections")"
 
   # Build full paths (support both relative and absolute paths)
-  if [[ "$official_subdir" = /* ]]; then
-    OFFICIAL_DIR="$official_subdir"
-  else
-    OFFICIAL_DIR="$BASE_DIR/$official_subdir"
-  fi
-
-  if [[ "$translations_subdir" = /* ]]; then
-    TRANSLATIONS_DIR="$translations_subdir"
-  else
-    TRANSLATIONS_DIR="$BASE_DIR/$translations_subdir"
-  fi
-
   if [[ "$lists_subdir" = /* ]]; then
     LISTS_DIR="$lists_subdir"
   else
@@ -160,13 +189,11 @@ setup_directories() {
   # shellcheck disable=SC2034  # ROMS_DIR used by sourcing scripts or for future use
   ROMS_DIR="$BASE_DIR"
 
-  # Validate directories exist
-  for dir in "$OFFICIAL_DIR" "$TRANSLATIONS_DIR" "$LISTS_DIR"; do
-    if [[ ! -d "$dir" ]]; then
-      ui_error "Required directory not found: $dir"
-      exit "$EXIT_INVALID_CONFIG"
-    fi
-  done
+  # Validate required directories exist
+  if [[ ! -d "$LISTS_DIR" ]]; then
+    ui_error "Required directory not found: $LISTS_DIR"
+    exit "$EXIT_INVALID_CONFIG"
+  fi
 
   # Create collections directory if needed
   mkdir -p "$COLLECTIONS_DIR"
@@ -176,16 +203,47 @@ setup_directories() {
 get_systems() {
   local -a systems=()
 
+  # Get primary source directory (first source in list)
+  local primary_source
+  primary_source=$(get_primary_source)
+
+  if [[ -z "$primary_source" ]]; then
+    ui_error "No primary source configured"
+    exit "$EXIT_INVALID_CONFIG"
+  fi
+
+  # Build full path for primary source
+  local primary_source_dir
+  if [[ "$primary_source" = /* ]]; then
+    primary_source_dir="$primary_source"
+  else
+    primary_source_dir="$BASE_DIR/$primary_source"
+  fi
+
+  log_verbose "Enumerating systems from primary source: $primary_source_dir"
+
+  # Get all subdirectories in the primary source
   while IFS= read -r -d '' dir; do
     local basename
     basename=$(basename "$dir")
-    if [[ "$basename" != "Official" ]]; then
+
+    # Exclude directories that match any source name (case-insensitive)
+    local is_source_dir=false
+    for source_name in "${SOURCE_NAMES[@]}"; do
+      if [[ "${basename,,}" == "${source_name,,}" ]]; then
+        is_source_dir=true
+        log_verbose "Excluding source directory from system list: $basename"
+        break
+      fi
+    done
+
+    if [[ "$is_source_dir" == false ]]; then
       systems+=("$basename")
     fi
-  done < <(find "$OFFICIAL_DIR" -maxdepth 1 -type d -print0 2>/dev/null)
+  done < <(find "$primary_source_dir" -maxdepth 1 -type d -print0 2>/dev/null)
 
   if [[ ${#systems[@]} -eq 0 ]]; then
-    ui_error "No system folders found in $OFFICIAL_DIR"
+    ui_error "No system folders found in $primary_source_dir"
     exit "$EXIT_INVALID_CONFIG"
   fi
 
@@ -338,59 +396,66 @@ main() {
 
   # Disable exit on error for the read loop
   set +e
-  while IFS= read -r query; do
+  # Use FD 3 for reading queries to avoid stdin conflicts with interactive commands
+  while IFS= read -r query <&3; do
     set -e  # Re-enable for loop body
 
     line_number=$((line_number + 1))
-    log_verbose "Read line $line_number: '$query'"
+    log_verbose "[DEBUG] --- Loop iteration start: line_number=$line_number, processed_count=$processed_count ---"
+    log_verbose "[DEBUG] Read line $line_number: '$query'"
 
     # Skip empty lines and comments
     if [[ -z "$query" || "$query" =~ ^[[:space:]]*# ]]; then
-      log_verbose "Skipping line $line_number (empty or comment)"
-      set +e
+      log_verbose "[DEBUG] Skipping line $line_number (empty or comment)"
       continue
     fi
 
     query=$(trim "$query")
     if [[ -z "$query" ]]; then
-      log_verbose "Skipping line $line_number (empty after trim)"
-      set +e
+      log_verbose "[DEBUG] Skipping line $line_number (empty after trim)"
       continue
     fi
 
     processed_count=$((processed_count + 1))
     STATS[processed]=$processed_count
-    log_info "Processing query $processed_count/$total_queries: $query"
-
+    log_info "[DEBUG] Processing query $processed_count/$total_queries: $query"
     # Generate rating
     local rating=""
     if [[ "$prepend_rating" == "true" ]]; then
       rating=$(format_rating "$processed_count" "$rating_digits")
+      log_verbose "[DEBUG] Rating for this query: $rating"
     fi
 
     ui_query_header "$query" "$processed_count" "$total_queries" "$rating"
 
     # Check if rank already exists
     if [[ "$prepend_rating" == "true" && -n "$rating" ]]; then
+      log_verbose "[DEBUG] Checking if rank exists for $rating"
       if check_rank_exists "$selected_system" "$collection_name" "$rating"; then
-        ui_warning "Skipping: ROM with rank $rating already exists"
+        ui_warning "[DEBUG] Skipping: ROM with rank $rating already exists"
         record_skip "$query" "rank_exists"
         continue
       fi
     fi
 
     # Process query
+    log_verbose "[DEBUG] About to call process_query for: $query"
     if process_query "$query" "$selected_system" "$collection_name" "$query" "$rating" "$prepend_rating"; then
+      log_verbose "[DEBUG] process_query returned success"
       record_success "$query" "" "processed"
+    else
+      log_warning "[DEBUG] process_query returned failure for: $query"
     fi
 
     # Update session state
+    log_verbose "[DEBUG] Updating session state for line $line_number"
     update_session "$line_number"
 
-    log_verbose "Finished processing query $processed_count, line $line_number"
+    log_verbose "[DEBUG] Finished processing query $processed_count, line $line_number"
+    log_verbose "[DEBUG] --- Loop iteration end: line_number=$line_number, processed_count=$processed_count ---"
     set +e  # Disable for next read iteration
 
-  done < "$list_file"
+  done 3<"$list_file"
   set -e  # Re-enable after loop
 
   log_info "Completed processing loop (processed $processed_count queries)"

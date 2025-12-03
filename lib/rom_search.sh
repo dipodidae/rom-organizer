@@ -113,6 +113,20 @@ gather_matches() {
   # Create cache directory if it doesn't exist
   mkdir -p "$cache_dir"
 
+  # Build sources JSON configuration
+  local sources_json="["
+  local first=true
+  for i in "${!SOURCE_NAMES[@]}"; do
+    if [[ "$first" == false ]]; then
+      sources_json+=","
+    fi
+    first=false
+    sources_json+="{\"name\":\"${SOURCE_NAMES[$i]}\",\"path\":\"${SOURCE_PATHS[$i]}\",\"priority\":${SOURCE_PRIORITIES[$i]}}"
+  done
+  sources_json+="]"
+
+  log_verbose "Sources JSON: $sources_json"
+
   # Build Python search command arguments
   local python_args=(
     "$rom_search_script"
@@ -122,6 +136,7 @@ gather_matches() {
     "--cache-dir=$cache_dir"
     "--max-results=$MAX_SEARCH_RESULTS"
     "--fuzzy-threshold=$DEFAULT_FUZZY_THRESHOLD"
+    "--sources=$sources_json"
   )
 
   if [[ "$VERBOSE" == true ]]; then
