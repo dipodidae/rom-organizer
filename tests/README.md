@@ -97,18 +97,18 @@ Tests create temporary directories and files as needed. Cleanup is automatic.
 test_feature() {
   echo ""
   echo "=== Testing Feature ==="
-  
+
   # Setup
   local temp_file=$(mktemp)
-  
+
   # Execute
   some_function > "$temp_file"
-  
+
   # Assert
   local result
   result=$(cat "$temp_file")
   assert_equals "expected" "$result" "Description of test"
-  
+
   # Cleanup
   rm -f "$temp_file"
 }
