@@ -1,75 +1,90 @@
-# ROM Collection Organizer v2.0.0
+# ROM Collection Organizer
 
-A comprehensive, modular ROM collection management tool with advanced search, automatic organization, and session management.
+A modular ROM collection management tool with fuzzy search, automatic organization, and session tracking.
 
-## 🎯 Overview
+## Introduction
 
-The ROM Collection Organizer is a refactored, production-ready system for managing large ROM collections. It features a modular architecture, comprehensive error handling, session state management, and an intuitive UI powered by `gum`.
+This tool organizes ROM collections by processing query lists and copying matching files into collection directories. It searches across configurable ROM sources with priority-based ranking, handles multi-game cartridges, and tracks operations through session state files.
 
-### Key Features
+Features:
+- Configurable ROM sources with priority-based search
+- Python-powered fuzzy matching with result caching
+- Session state tracking with resume capability
+- Dry run mode for operation preview
+- Shared title detection for multi-game cartridges
+- Comprehensive error handling and logging
 
-- **Modular Architecture**: Clean separation of concerns across 8 specialized modules
-- **Smart Search**: Python-powered fuzzy matching with caching
-- **Session Management**: Resume interrupted operations, track statistics
-- **Error Recovery**: Comprehensive error handling with automatic cleanup
-- **Dry Run Mode**: Preview operations without making changes
-- **Shared Titles**: Intelligent handling of multi-game cartridges
-- **Progress Tracking**: Real-time statistics and detailed logging
-- **Configuration System**: User-customizable settings with defaults
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 organizer/
-├── rom-organizer.sh          # Main entry point (200 lines)
-├── organizer.sh              # Legacy script (preserved)
+├── rom-organizer.sh          # Main entry point
+├── rom-search.py             # Python search engine
 ├── lib/                      # Core modules
-│   ├── rom_constants.sh      # Constants and configuration
-│   ├── rom_utils.sh          # Utility functions
-│   ├── rom_ui.sh             # UI and gum wrappers
-│   ├── rom_config.sh         # Configuration management
-│   ├── rom_core.sh           # ROM file operations
+│   ├── rom_constants.sh      # Constants and defaults
+│   ├── rom_utils.sh          # Utility functions and validation
+│   ├── rom_ui.sh             # User interface wrappers
+│   ├── rom_config.sh         # Configuration management and source parsing
+│   ├── rom_core.sh           # ROM file operations (copy/extract)
 │   ├── rom_search.sh         # Search engine integration
-│   ├── rom_query.sh          # Query processing
-│   └── rom_state.sh          # Session state management
+│   ├── rom_query.sh          # Query processing logic
+│   └── rom_state.sh          # Session state and statistics
 ├── config/
 │   └── defaults.conf         # Default configuration
 └── tests/
-    └── test_basic.sh         # Test suite
+    ├── test_basic.sh         # Basic functionality tests
+    ├── test_sources.sh       # Source configuration tests
+    └── test_search_engine.sh # Python integration tests
 ```
 
-## 🚀 Quick Start
+## Setup and Installation
 
-### Installation
+### Dependencies
 
-1. Ensure all dependencies are installed:
-   ```bash
-   # Required
-   sudo apt install gum python3 unzip
+Required:
+```bash
+sudo apt install python3 unzip
+```
 
-   # Optional (for additional archive formats)
-   sudo apt install p7zip-full unrar
-   ```
+Optional (for enhanced functionality):
+```bash
+# Interactive UI
+sudo apt install gum
 
-2. Set up Python environment (recommended):
-   ```bash
-   cd /path/to/roms/Scripts
-   python3 -m venv rom_env
-   ./rom_env/bin/pip install rapidfuzz regex
-   ```
+# Additional archive formats
+sudo apt install p7zip-full unrar
 
-3. Make scripts executable:
-   ```bash
-   chmod +x rom-organizer.sh lib/*.sh
-   ```
+# Python packages for better performance
+python3 -m pip install rapidfuzz regex
+```
 
-### Basic Usage
+### Python Environment Setup
+
+Recommended for isolated dependency management:
+
+```bash
+cd /path/to/organizer
+python3 -m venv rom_env
+./rom_env/bin/pip install rapidfuzz regex
+```
+
+The script will automatically use `rom_env/bin/python3` if available.
+
+### Permissions
+
+```bash
+chmod +x rom-organizer.sh rom-search.py lib/*.sh
+```
+
+## Usage
+
+### Basic Commands
 
 ```bash
 # Interactive mode
 ./rom-organizer.sh
 
-# Dry run (preview without changes)
+# Dry run (preview operations)
 ./rom-organizer.sh --dry-run
 
 # Verbose logging
@@ -77,371 +92,324 @@ organizer/
 
 # Custom configuration
 ./rom-organizer.sh --config /path/to/config.conf
-```
 
-## 📖 Usage Guide
+# Resume interrupted session
+./rom-organizer.sh --resume
+
+# Show version
+./rom-organizer.sh --version
+```
 
 ### Directory Structure
 
-The script expects this directory structure:
+Expected layout:
 
 ```
 ROMBase/
-├── Official/              # Original ROMs organized by system (priority: 100)
+├── Official/                  # Original ROMs (priority: 100)
 │   ├── Nintendo - SNES/
 │   ├── Nintendo - NES/
 │   └── [other systems]/
-├── Translations/          # Translated ROMs (priority: 200, preferred)
+├── Translations/              # Translations (priority: 200)
 │   └── [systems]/
-├── Hacks/                 # ROM hacks (optional, configurable)
-│   └── [systems]/
-├── Lists/                 # Query files (*.txt)
+├── Lists/                     # Query files (*.txt)
 │   ├── Best Games.txt
 │   └── Top 100.txt
-└── Collections/           # Output directory (auto-created)
+└── Collections/               # Output (auto-created)
     └── [system]/
-        └── [collection name]/
+        └── [collection]/
 ```
 
-**Note**: Sources are configurable! See [Configuration](#-configuration) for details on adding custom sources like Hacks, Homebrew, etc.
+Sources are fully configurable. See [Configuration](#configuration) for custom sources.
 
-### Query List Format
+### Query File Format
 
-Create text files in `Lists/` with one game query per line:
+Create `.txt` files in the `Lists/` directory:
 
 ```
 # Best SNES Games
 Super Mario World
 The Legend of Zelda: A Link to the Past
 Super Metroid
-Chrono Trigger
 
-# Shared titles (multi-game carts)
+# Multi-game cartridges (shared titles)
 Super Mario All-Stars / Super Mario World
 ```
 
-### Command-Line Options
+Lines starting with `#` are comments. Blank lines are ignored.
 
-| Option | Description |
-|--------|-------------|
-| `-h, --help` | Show help message |
-| `-v, --verbose` | Enable detailed logging |
-| `--dry-run` | Simulate operations without changes |
-| `--version` | Show version information |
-| `--config FILE` | Use custom configuration file |
-| `--resume` | Resume interrupted session |
+### Example Workflow
 
-### Environment Variables
+1. Create a query list: `Lists/SNES Favorites.txt`
+2. Run: `./rom-organizer.sh`
+3. Select system: `Nintendo - SNES`
+4. Select list: `SNES Favorites`
+5. For each query, select matching ROM or skip
+6. ROMs are copied to `Collections/Nintendo - SNES/SNES Favorites/`
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ROM_BASE_DIR` | Override base directory | Auto-detected |
-| `TEST_MODE` | Disable error traps for testing | `false` |
-
-## 🏗️ Architecture
-
-### Module Responsibilities
-
-| Module | Responsibility | Key Functions |
-|--------|---------------|---------------|
-| `rom_constants.sh` | Constants, defaults, magic numbers | Version info, UI symbols, limits |
-| `rom_utils.sh` | Utilities, validation, logging | `log_*`, `validate_*`, `trim` |
-| `rom_ui.sh` | User interface, gum wrappers | `ui_*`, `gum_safe` |
-| `rom_config.sh` | Configuration management | `load_config`, `get_config` |
-| `rom_core.sh` | ROM file operations | `copy_rom_file`, `extract_rom` |
-| `rom_search.sh` | Search engine integration | `gather_matches`, `parse_search_results` |
-| `rom_query.sh` | Query processing logic | `process_query`, `detect_shared_titles` |
-| `rom_state.sh` | Session state, statistics | `init_session`, `record_*` |
-
-### Data Flow
-
-```
-Query File → Parse → Validate → Search → User Selection → Copy/Extract → Log
-                ↓                 ↓                            ↓
-            Session State      Search Cache              Statistics
-```
-
-### Error Handling
-
-The system uses multiple layers of error handling:
-
-1. **Strict Mode**: `set -euo pipefail` catches most errors
-2. **Error Traps**: Custom handler on ERR signal
-3. **Exit Traps**: Cleanup temporary files on exit
-4. **Validation**: Input validation before operations
-5. **Safe Wrappers**: `gum_safe` handles interactive command failures
-
-## ⚙️ Configuration
+## Configuration
 
 ### Default Settings
 
-Located in `config/defaults.conf`:
+File: `config/defaults.conf`
 
 ```bash
-# Directory Configuration
-base_dir=/mnt/drive/Roms          # Base directory for all ROMs
+# Base directory for all ROMs
+base_dir=/mnt/drive/Roms
 
-# ROM Source Configuration (NEW in v2.0!)
-# Format: sources=name:path:priority
-# - name: Display name for the source
-# - path: Directory path (relative to base_dir or absolute)
-# - priority: Search priority (higher number = preferred in results)
-#
-# Sources are searched in order, with higher priority preferred in results
+# ROM Sources (format: name:path:priority)
 sources=Official:Official:100
 sources=Translations:Translations:200
-# sources=Hacks:Hacks:150          # Add custom sources!
-# sources=Homebrew:Homebrew:120
 
-# Other Directories
-lists_dir=Lists                   # Query list files
-collections_dir=Collections        # Output directory
+# Directory paths
+lists_dir=Lists
+collections_dir=Collections
 
-# Search Settings
-auto_select_single=true           # Auto-select when only one match
+# Search behavior
+auto_select_single=true           # Auto-select single matches
 prepend_rating_default=true       # Add rating prefix to filenames
-fuzzy_threshold=15.0              # Search sensitivity (0-100)
+fuzzy_threshold=15.0              # Match sensitivity (0-100, lower = stricter)
 max_results=100                   # Maximum search results
 
-# Session Settings
-enable_dry_run=false              # Dry run by default
-enable_resume=true                # Enable session resume
-cleanup_sessions_days=7           # Days to keep session files
-create_skip_markers=true          # Create .skipped files
+# Session settings
+enable_dry_run=false
+enable_resume=true
+cleanup_sessions_days=7
+create_skip_markers=true
 ```
 
-### Adding Custom ROM Sources
+### Source Configuration
 
-You can add any number of custom ROM sources. The script will:
-1. **Search all sources** for matching ROMs
-2. **Sort results by priority** (higher number = preferred)
-3. **Use the first source** for system directory enumeration
+Format: `sources=name:path:priority`
 
-Example configurations:
+- **name**: Display name
+- **path**: Relative to `base_dir` or absolute path
+- **priority**: Higher values preferred in search results
 
-#### Add ROM Hacks
+#### Adding Custom Sources
 
+Hacks:
 ```bash
 sources=Official:Official:100
 sources=Hacks:Hacks:150
 sources=Translations:Translations:200
 ```
 
-#### Add Homebrew
-
+Homebrew:
 ```bash
 sources=Official:Official:100
 sources=Homebrew:Homebrew:120
 sources=Translations:Translations:200
 ```
 
-#### Use Absolute Paths
-
+Absolute paths:
 ```bash
 sources=Official:/media/roms/official:100
+sources=External:/mnt/backup/roms:150
 sources=Translations:/media/roms/translations:200
-sources=External:/mnt/external/roms:150
 ```
 
-**Priority Guidelines:**
-- `100-149`: Original/Official ROMs
-- `150-199`: Modifications (Hacks, Homebrew)
-- `200+`: Translations (typically preferred)
+Priority guidelines:
+- 100-149: Original ROMs
+- 150-199: Modifications (hacks, homebrew)
+- 200+: Translations (typically preferred)
 
 ### User Configuration
 
 Create `~/.config/rom-organizer/config.conf` to override defaults:
 
 ```bash
-# My custom settings
 fuzzy_threshold=10.0
 max_results=50
 
-# Add my custom sources
 sources=Official:Official:100
 sources=MyHacks:Hacks:180
 sources=Translations:Translations:200
 ```
 
-## 📊 Session Management
+### Environment Variables
 
-### Session State
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ROM_BASE_DIR` | Override base directory | Auto-detected |
+| `TEST_MODE` | Disable error traps | `false` |
 
-Sessions are automatically tracked in `~/.rom-organizer/sessions/`:
+## Architecture
+
+### Module Overview
+
+The codebase is organized into 8 specialized modules:
+
+| Module | Responsibility |
+|--------|---------------|
+| `rom_constants.sh` | Version info, constants, UI symbols |
+| `rom_utils.sh` | Logging, validation, string utilities |
+| `rom_ui.sh` | User interface, gum wrappers |
+| `rom_config.sh` | Configuration loading, source parsing |
+| `rom_core.sh` | File operations (copy, extract) |
+| `rom_search.sh` | Python search engine integration |
+| `rom_query.sh` | Query parsing, shared title detection |
+| `rom_state.sh` | Session tracking, statistics |
+
+### Dependency Hierarchy
 
 ```
-session_YYYYMMDD_HHMMSS.state
+Layer 1 (Foundation):
+  rom_constants.sh
+  rom_utils.sh (depends: constants)
+  rom_ui.sh (depends: constants, utils)
+
+Layer 2 (Core Systems):
+  rom_config.sh (depends: constants, utils)
+  rom_core.sh (depends: constants, utils, ui)
+  rom_search.sh (depends: constants, utils, ui)
+
+Layer 3 (Business Logic):
+  rom_query.sh (depends: Layer 1 & 2)
+  rom_state.sh (depends: constants, utils, ui)
+
+Layer 4 (Application):
+  rom-organizer.sh (depends: all modules)
 ```
 
-Contains:
-- Collection name
-- System name
-- Last processed line
-- Status (active/complete)
+### Data Flow
 
-### Operation Logs
-
-Detailed logs are stored in:
 ```
-~/.rom-organizer/logs/session_YYYYMMDD_HHMMSS.log
+Query File → Parse → Validate → Search (Python) → User Selection
+                ↓                    ↓                  ↓
+          Session State        Cache Update        Copy/Extract
+                                                        ↓
+                                                   Statistics
 ```
 
-### Summaries
+### Search Engine
 
-Operation summaries are saved to:
-```
-~/.rom-organizer/summaries/summary_YYYYMMDD_HHMMSS.txt
-```
+The Python search engine (`rom-search.py`):
+- Accepts JSON configuration with dynamic sources
+- Scans source directories for ROM files
+- Performs fuzzy matching using rapidfuzz (or difflib fallback)
+- Sorts results by priority, then match score
+- Caches results with source-specific hashing
 
-## 🧪 Testing
+### Error Handling
 
-Run the test suite:
+Multi-layer approach:
+1. Strict mode: `set -euo pipefail`
+2. Error traps: Custom ERR handler
+3. Exit traps: Cleanup temporary files
+4. Input validation: Pre-operation checks
+5. Safe wrappers: `gum_safe` for interactive commands
 
+## Testing
+
+### Test Suites
+
+Run all tests:
 ```bash
-./tests/test_basic.sh
+cd tests
+./test_basic.sh          # 19 tests: core functionality
+./test_sources.sh        # 24 tests: source configuration
+./test_search_engine.sh  # 12 tests: Python integration
 ```
 
-Expected output:
+### Expected Output
+
 ```
 ROM Organizer Test Suite
 =========================
+[✓] Module loading
+[✓] Configuration parsing
+[✓] String utilities
 ...
-Tests Run:    19
+Tests Run: 19
 Tests Passed: 19
 Tests Failed: 0
 
 All tests passed!
 ```
 
-## 🔧 Advanced Features
+### Continuous Integration
 
-### Shared Title Processing
+GitHub Actions workflows:
+- `.github/workflows/shellcheck.yml`: Linting
+- `.github/workflows/tests.yml`: Automated test execution
 
-The system intelligently detects and handles shared titles:
-
-```
-Super Mario All-Stars / Super Mario World
-```
-
-Detected patterns:
-- `/` (slash)
-- `&` (ampersand)
-- `+` (plus)
-- `and` (word)
-
-You can:
-1. Select individual games
-2. Select multiple games with shared rank
-3. Process manually
-
-### Dry Run Mode
-
-Preview operations without making changes:
-
-```bash
-./rom-organizer.sh --dry-run
-```
-
-All operations will show `[DRY RUN] Would perform: ...`
-
-### Resume Capability
-
-If interrupted, resume from where you left off:
-
-```bash
-./rom-organizer.sh --resume
-```
-
-The system will detect active sessions and offer to continue.
-
-## 📝 Migration from Legacy Script
-
-The original `organizer.sh` is preserved for compatibility. New features:
-
-| Feature | Legacy | v2.0 |
-|---------|--------|------|
-| Modular architecture | ❌ | ✅ |
-| Error recovery | ❌ | ✅ |
-| Session management | ❌ | ✅ |
-| Dry run mode | ❌ | ✅ |
-| Configuration files | ❌ | ✅ |
-| Comprehensive logging | ❌ | ✅ |
-| Test suite | ❌ | ✅ |
-| Progress tracking | Basic | Advanced |
-
-Both scripts can coexist. To switch:
-
-```bash
-# Legacy
-./organizer.sh
-
-# New version
-./rom-organizer.sh
-```
-
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
 **"gum not found"**
+
+The script works without gum (uses fallback prompts). To install:
 ```bash
-# Install gum
-brew install gum  # macOS
-# or download from: github.com/charmbracelet/gum
+# Ubuntu/Debian
+wget https://github.com/charmbracelet/gum/releases/download/v0.11.0/gum_0.11.0_amd64.deb
+sudo dpkg -i gum_0.11.0_amd64.deb
+
+# macOS
+brew install gum
 ```
 
 **"ROM search engine not found"**
-- Ensure `rom_search.py` exists in the same directory as the script
-- Check Python 3 is installed: `python3 --version`
+
+Verify:
+```bash
+ls -l rom-search.py
+python3 --version
+```
+
+Ensure `rom-search.py` is in the same directory as `rom-organizer.sh`.
 
 **"No ROM files found in archive"**
-- Verify archive contains ROM files with supported extensions
-- Check if 7z/unrar are installed for those formats
+
+Check archive contents:
+```bash
+unzip -l "ROM file.zip"
+7z l "ROM file.7z"
+```
+
+Verify ROM extensions: `.smc`, `.sfc`, `.nes`, `.gb`, `.gba`, `.md`, `.gen`, etc.
 
 **Session file permissions**
+
 ```bash
 mkdir -p ~/.rom-organizer/{sessions,logs,summaries}
 chmod 755 ~/.rom-organizer
 ```
 
+**Python dependencies**
+
+If rapidfuzz is unavailable, the script falls back to difflib (slower). Install:
+```bash
+pip3 install rapidfuzz regex
+# or use virtual environment
+./rom_env/bin/pip install rapidfuzz regex
+```
+
 ### Debug Mode
 
-Enable verbose logging to troubleshoot:
-
+Enable verbose logging:
 ```bash
 ./rom-organizer.sh --verbose 2>&1 | tee debug.log
 ```
 
-## 📜 License
+Check logs:
+```bash
+ls -lt ~/.rom-organizer/logs/
+tail -f ~/.rom-organizer/logs/session_*.log
+```
 
-MIT License - See original script header for details
+### Session Recovery
 
-## 🤝 Contributing
+View active sessions:
+```bash
+ls ~/.rom-organizer/sessions/*.state
+cat ~/.rom-organizer/sessions/session_*.state
+```
 
-This is a refactored version of an existing ROM management tool. Future improvements:
-
-- [ ] Add resume dialog for active sessions
-- [ ] Implement undo functionality
-- [ ] Add batch processing mode
-- [ ] Create web UI for remote management
-- [ ] Add ROM metadata extraction
-- [ ] Implement duplicate detection
-
-## 📧 Support
-
-For issues or questions:
-1. Check the troubleshooting section
-2. Review logs in `~/.rom-organizer/logs/`
-3. Run tests: `./tests/test_basic.sh`
-4. Enable verbose mode for debugging
-
-## 🙏 Acknowledgments
-
-- Original ROM organizer script
-- [Gum](https://github.com/charmbracelet/gum) for beautiful CLI UI
-- [RapidFuzz](https://github.com/maxbachmann/RapidFuzz) for fast fuzzy matching
-- Python search engine implementation
-
----
-
-**ROM Collection Organizer v2.0.0** - Built with ❤️ for retro gaming enthusiasts
+Resume or clean up:
+```bash
+./rom-organizer.sh --resume
+# or manually remove
+rm ~/.rom-organizer/sessions/session_*.state
+```
